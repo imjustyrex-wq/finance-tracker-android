@@ -1,47 +1,48 @@
 package com.pera.tracker
 
 import android.content.Context
-import org.json.JSONArray
-import org.json.JSONObject
-
-data class Account(var id: String, var name: String, var balance: Double)
+import com.google.gson.Gson
+import java.util.UUID
 
 object Store {
     private const val PREFS = "pera_tracker_prefs"
-    private const val KEY_ACCOUNTS = "accounts"
+    private const val KEY_DATA = "app_data"
+    private val gson = Gson()
 
-    fun loadAccounts(context: Context): MutableList<Account> {
+    fun load(context: Context): AppData {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val json = prefs.getString(KEY_ACCOUNTS, null) ?: return defaultAccounts()
-        val arr = JSONArray(json)
-        val list = mutableListOf<Account>()
-        for (i in 0 until arr.length()) {
-            val obj = arr.getJSONObject(i)
-            list.add(Account(obj.getString("id"), obj.getString("name"), obj.getDouble("balance")))
+        val json = prefs.getString(KEY_DATA, null) ?: return defaultData()
+        return try {
+            gson.fromJson(json, AppData::class.java) ?: defaultData()
+        } catch (e: Exception) {
+            defaultData()
         }
-        return list
     }
 
-    fun saveAccounts(context: Context, accounts: List<Account>) {
-        val arr = JSONArray()
-        for (a in accounts) {
-            val obj = JSONObject()
-            obj.put("id", a.id)
-            obj.put("name", a.name)
-            obj.put("balance", a.balance)
-            arr.put(obj)
-        }
+    fun save(context: Context, data: AppData) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_ACCOUNTS, arr.toString()).apply()
+        prefs.edit().putString(KEY_DATA, gson.toJson(data)).apply()
     }
 
-    private fun defaultAccounts(): MutableList<Account> {
-        return mutableListOf(
-            Account("gcash", "GCash", 0.0),
-            Account("maya", "Maya", 0.0),
-            Account("cash", "Cash", 0.0)
+    fun newId(): String = UUID.randomUUID().toString()
+
+    fun defaultData(): AppData {
+        return AppData(
+            accounts = mutableListOf(
+                Account(newId(), "GCash", 0.0),
+                Account(newId(), "Maya", 0.0),
+                Account(newId(), "Cash", 0.0)
+            ),
+            categories = mutableListOf(
+                Category("food", "Food", "🍜", "#FFB100"),
+                Category("transport", "Transport", "🚌", "#1B3A4B"),
+                Category("utilities", "Utilities", "💡", "#2E8B57"),
+                Category("shopping", "Shopping", "🛍️", "#E4572E"),
+                Category("health", "Health", "💊", "#7A5195"),
+                Category("fun", "Fun", "🎮", "#0089BA"),
+                Category("paylater", "PayLater", "🧾", "#C05C36"),
+                Category("other", "Other", "📦", "#6B7280")
+            )
         )
     }
-
-    fun newId(): String = System.currentTimeMillis().toString()
 }
