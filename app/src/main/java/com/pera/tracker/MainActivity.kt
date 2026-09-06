@@ -23,6 +23,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import android.widget.*
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -71,7 +72,7 @@ class MainActivity : Activity() {
         populateNavBar()
 
         setContentView(root)
-        showTab("home")
+        showTab("home", 0)
     }
 
     private fun persist() { Store.save(this, data) }
@@ -81,7 +82,7 @@ class MainActivity : Activity() {
         val idx = items.indexOf(currentTab)
         if (idx == -1) return
         val newIdx = (idx + delta).coerceIn(0, items.size - 1)
-        if (newIdx != idx) showTab(items[newIdx])
+        if (newIdx != idx) showTab(items[newIdx], if (newIdx > idx) 1 else -1)
     }
 
     // ---------- THEMES ----------
@@ -147,6 +148,18 @@ class MainActivity : Activity() {
         }
     }
 
+    // let a nested horizontally-scrollable view (like the category chip row) keep
+    // its own drag gesture instead of the outer swipe-between-tabs system grabbing it
+    private fun exemptFromSwipe(view: View) {
+        view.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> v.parent?.requestDisallowInterceptTouchEvent(true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            false
+        }
+    }
+
     private fun showAnimatedDialog(builder: AlertDialog.Builder): AlertDialog {
         val dialog = builder.create()
         dialog.window?.attributes?.windowAnimations = R.style.DialogAnimation
@@ -163,10 +176,12 @@ class MainActivity : Activity() {
         return d
     }
 
+    // outline=true buttons use bgColor as BOTH the border and the text color,
+    // so the label is always the same hue as its border — never invisible.
     private fun styledButton(text: String, bgColor: Int, textColor: Int, outline: Boolean = false): Button {
         val b = Button(this)
         b.text = text
-        b.setTextColor(textColor)
+        b.setTextColor(if (outline) bgColor else textColor)
         b.typeface = headFont
         b.textSize = 14f
         b.setPadding(40, 32, 40, 32)
@@ -195,28 +210,6 @@ class MainActivity : Activity() {
         return e
     }
 
-    private fun sectionTitleRow(p: Palette, text: String, topMargin: Int = 40, onEnlarge: (() -> Unit)? = null): LinearLayout {
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(0, topMargin, 0, 14)
-        val t = TextView(this)
-        t.text = text
-        t.textSize = 19f
-        t.typeface = headFont
-        t.setTextColor(p.text)
-        t.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        row.addView(t)
-        if (onEnlarge != null) {
-            val btn = styledButton("Enlarge", p.primary, p.onPrimary, outline = true)
-            btn.textSize = 11f
-            btn.setPadding(20, 14, 20, 14)
-            btn.setOnClickListener { onEnlarge() }
-            row.addView(btn)
-        }
-        return row
-    }
-
     private fun sectionTitle(p: Palette, text: String, topMargin: Int = 40): TextView {
         val t = TextView(this)
         t.text = text
@@ -235,6 +228,16 @@ class MainActivity : Activity() {
         val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         lp.topMargin = 16
         c.layoutParams = lp
+        return c
+    }
+
+    // a card that opens a bigger detail view when tapped, with a small hint line
+    private fun tappableCard(p: Palette, onTap: () -> Unit): LinearLayout {
+        val c = card(p)
+        c.isClickable = true
+        c.isFocusable = true
+        addPressAnim(c)
+        c.setOnClickListener { onTap() }
         return c
     }
 
@@ -263,7 +266,7 @@ class MainActivity : Activity() {
     private fun accountTile(p: Palette, acc: Account): LinearLayout {
         val t = LinearLayout(this)
         t.orientation = LinearLayout.VERTICAL
-        t.setPadding(28, 24, 28, 24)
+        t.setPadding(32, 32, 32, 32)
         t.background = roundedBg(p.surface, 20f, p.border)
         val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         lp.marginEnd = 10
@@ -274,7 +277,7 @@ class MainActivity : Activity() {
         name.text = acc.name
         name.setTextColor(p.text)
         name.typeface = bodyFont
-        name.textSize = 13f
+        name.textSize = 14f
         name.alpha = 0.7f
         t.addView(name)
 
@@ -282,14 +285,29 @@ class MainActivity : Activity() {
         bal.text = pesoFormat.format(acc.balance)
         bal.setTextColor(p.text)
         bal.typeface = headFont
-        bal.textSize = 18f
-        bal.setPadding(0, 6, 0, 0)
+        bal.textSize = 22f
+        bal.setPadding(0, 8, 0, 0)
         t.addView(bal)
 
         return t
     }
 
-    // colored dot + label + amount + tinted progress bar, used for category breakdowns
+    // invisible twin of accountTile — used only to balance a lone odd-numbered
+    // account so the row's spacing matches a real 2-tile row exactly
+    private fun accountTilePlaceholder(): LinearLayout {
+        val t = LinearLayout(this)
+        t.orientation = LinearLayout.VERTICAL
+        t.setPadding(32, 32, 32, 32)
+        val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        lp.marginEnd = 10
+        lp.marginStart = 10
+        t.layoutParams = lp
+        t.alpha = 0f
+        val name = TextView(this); name.text = " "; name.textSize = 14f; t.addView(name)
+        val bal = TextView(this); bal.text = " "; bal.textSize = 22f; t.addView(bal)
+        return t
+    }
+
     private fun categoryRow(p: Palette, cat: Category?, amt: Double, pct: Int, big: Boolean): LinearLayout {
         val wrap = LinearLayout(this)
         wrap.orientation = LinearLayout.VERTICAL
@@ -348,7 +366,6 @@ class MainActivity : Activity() {
     }
 
     private fun showEnlargeDialog(title: String, buildContent: (LinearLayout) -> Unit) {
-        val p = palette()
         val outer = LinearLayout(this)
         outer.orientation = LinearLayout.VERTICAL
         outer.setPadding(20, 10, 20, 10)
@@ -395,7 +412,7 @@ class MainActivity : Activity() {
 
     private fun netWorth(): Double = data.accounts.sumOf { it.balance }
 
-    private fun showTab(tab: String) {
+    private fun showTab(tab: String, direction: Int) {
         currentTab = tab
         contentContainer.removeAllViews()
         val p = palette()
@@ -411,6 +428,16 @@ class MainActivity : Activity() {
         contentContainer.addView(view)
         navBar.setBackgroundColor(p.surface)
         highlightNav()
+
+        val screenWidth = resources.displayMetrics.widthPixels.toFloat()
+        view.alpha = 0f
+        when (direction) {
+            1 -> view.translationX = screenWidth * 0.25f
+            -1 -> view.translationX = -screenWidth * 0.25f
+            else -> view.translationY = 30f
+        }
+        view.animate().translationX(0f).translationY(0f).alpha(1f)
+            .setDuration(220).setInterpolator(DecelerateInterpolator()).start()
     }
 
     private fun navItemList(): List<Pair<String, String>> {
@@ -426,14 +453,15 @@ class MainActivity : Activity() {
         for ((id, label) in navItemList()) {
             val tv = TextView(this)
             tv.text = label
-            tv.textSize = 13.5f
+            tv.textSize = 11.5f
             tv.typeface = headFont
             tv.gravity = Gravity.CENTER
-            tv.setPadding(6, 30, 6, 30)
+            tv.maxLines = 1
+            tv.setPadding(2, 30, 2, 30)
             tv.isClickable = true
             tv.isFocusable = true
             tv.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            tv.setOnClickListener { showTab(id) }
+            tv.setOnClickListener { showTab(id, 0) }
             addPressAnim(tv)
             navButtons[id] = tv
             navBar.addView(tv)
@@ -450,7 +478,6 @@ class MainActivity : Activity() {
 
     // ---------- QUICK ADD EXPENSE (popup) ----------
     private fun showAddExpenseDialog() {
-        val p = palette()
         if (data.accounts.isEmpty()) {
             Toast.makeText(this, "Add an account first, in Settings", Toast.LENGTH_SHORT).show()
             return
@@ -533,7 +560,7 @@ class MainActivity : Activity() {
                 data.netWorthLog.add(NetWorthEntry(System.currentTimeMillis(), netWorth(), "Expense"))
                 persist()
                 Toast.makeText(this, "Expense added", Toast.LENGTH_SHORT).show()
-                showTab(currentTab)
+                showTab(currentTab, 0)
             }
             .setNegativeButton("Cancel", null)
         showAnimatedDialog(builder)
@@ -573,11 +600,7 @@ class MainActivity : Activity() {
             row.orientation = LinearLayout.HORIZONTAL
             row.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 12 }
             for (acc in chunk) row.addView(accountTile(p, acc))
-            if (chunk.size == 1) {
-                val filler = View(this)
-                filler.layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
-                row.addView(filler)
-            }
+            if (chunk.size == 1) row.addView(accountTilePlaceholder())
             tilesWrap.addView(row)
         }
         page.addView(tilesWrap)
@@ -636,6 +659,8 @@ class MainActivity : Activity() {
         formCard.addView(catLabel)
 
         val catScroll = HorizontalScrollView(this)
+        catScroll.setPadding(0, 6, 0, 6)
+        exemptFromSwipe(catScroll)
         val catRow = LinearLayout(this)
         catRow.orientation = LinearLayout.HORIZONTAL
         catScroll.addView(catRow)
@@ -697,7 +722,7 @@ class MainActivity : Activity() {
             data.netWorthLog.add(NetWorthEntry(System.currentTimeMillis(), netWorth(), "Expense"))
             persist()
             Toast.makeText(this, "Expense added", Toast.LENGTH_SHORT).show()
-            showTab("expenses")
+            showTab("expenses", 0)
         }
 
         page.addView(sectionTitle(p, "Manage categories"))
@@ -710,8 +735,8 @@ class MainActivity : Activity() {
             val label = bodyText(p, "${cat.emoji} ${cat.name}")
             label.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             row.addView(label)
-            val delBtn = styledButton("Delete", p.bad, Color.WHITE, outline = true)
-            delBtn.setOnClickListener { data.categories.removeAll { c -> c.id == cat.id }; persist(); showTab("expenses") }
+            val delBtn = styledButton("Delete", p.bad, p.bad, outline = true)
+            delBtn.setOnClickListener { data.categories.removeAll { c -> c.id == cat.id }; persist(); showTab("expenses", 0) }
             row.addView(delBtn)
             catCard.addView(row)
         }
@@ -725,7 +750,7 @@ class MainActivity : Activity() {
             val colors = listOf("#FFB100", "#1B3A4B", "#2E8B57", "#E4572E", "#7A5195", "#0089BA")
             data.categories.add(Category(Store.newId(), name, "🏷️", colors.random()))
             persist()
-            showTab("expenses")
+            showTab("expenses", 0)
         }
         catCard.addView(addCatBtn)
         page.addView(catCard)
@@ -744,8 +769,8 @@ class MainActivity : Activity() {
             val info = bodyText(p, "$noteOrCat\n${exp.date} · $accName · -" + pesoFormat.format(exp.amount))
             info.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             row.addView(info)
-            val delBtn = styledButton("Delete", p.bad, Color.WHITE, outline = true)
-            delBtn.setOnClickListener { data.expenses.removeAll { e -> e.id == exp.id }; persist(); showTab("expenses") }
+            val delBtn = styledButton("Delete", p.bad, p.bad, outline = true)
+            delBtn.setOnClickListener { data.expenses.removeAll { e -> e.id == exp.id }; persist(); showTab("expenses", 0) }
             row.addView(delBtn)
             page.addView(row)
         }
@@ -770,19 +795,19 @@ class MainActivity : Activity() {
         for (e in monthExpenses) byCat[e.categoryId] = (byCat[e.categoryId] ?: 0.0) + e.amount
         val monthTotal = monthExpenses.sumOf { it.amount }
 
-        val catCard = card(p)
-        catCard.addView(sectionTitleRow(p, "Spending by category (this month)", 0, onEnlarge = {
+        val catCard = tappableCard(p) {
             showEnlargeDialog("Spending by category") { container ->
                 renderCategoryBreakdown(container, p, byCat, monthTotal, big = true)
             }
-        }))
+        }
+        catCard.addView(sectionTitle(p, "Spending by category (this month)", 0))
         renderCategoryBreakdown(catCard, p, byCat, monthTotal, big = false)
+        catCard.addView(bodyText(p, "Tap for full breakdown", 11.5f, muted = true).also { it.setPadding(0, 12, 0, 0) })
         page.addView(catCard)
 
-        val nwCard = card(p)
         val recentLog = data.netWorthLog.takeLast(30)
-        nwCard.addView(sectionTitleRow(p, "Net worth trend", 0, onEnlarge = if (recentLog.size >= 2) {
-            {
+        val nwCard = if (recentLog.size >= 2) {
+            tappableCard(p) {
                 showEnlargeDialog("Net worth trend") { container ->
                     val big = SimpleLineView(this)
                     big.values = recentLog.map { it.amount.toFloat() }
@@ -800,7 +825,8 @@ class MainActivity : Activity() {
                     container.addView(rangeRow)
                 }
             }
-        } else null))
+        } else card(p)
+        nwCard.addView(sectionTitle(p, "Net worth trend", 0))
         if (recentLog.size < 2) {
             nwCard.addView(bodyText(p, "Add or spend money a few times to see your trend.", 14f, muted = true))
         } else {
@@ -809,6 +835,7 @@ class MainActivity : Activity() {
             sparkline.lineColor = p.primary
             sparkline.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 300)
             nwCard.addView(sparkline)
+            nwCard.addView(bodyText(p, "Tap for full breakdown", 11.5f, muted = true).also { it.setPadding(0, 12, 0, 0) })
         }
         page.addView(nwCard)
 
@@ -880,7 +907,7 @@ class MainActivity : Activity() {
             data.goals.add(Goal(Store.newId(), label, target, dateStr, netWorth(), todayString()))
             persist()
             Toast.makeText(this, "Goal added", Toast.LENGTH_SHORT).show()
-            showTab("goals")
+            showTab("goals", 0)
         }
 
         val avgDailySavings: Double = run {
@@ -910,8 +937,8 @@ class MainActivity : Activity() {
             nameText.textSize = 15f
             nameText.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             nameRow.addView(nameText)
-            val delBtn = styledButton("Delete", p.bad, Color.WHITE, outline = true)
-            delBtn.setOnClickListener { data.goals.removeAll { g -> g.id == goal.id }; persist(); showTab("goals") }
+            val delBtn = styledButton("Delete", p.bad, p.bad, outline = true)
+            delBtn.setOnClickListener { data.goals.removeAll { g -> g.id == goal.id }; persist(); showTab("goals", 0) }
             nameRow.addView(delBtn)
             gcard.addView(nameRow)
 
@@ -995,7 +1022,7 @@ class MainActivity : Activity() {
             data.paylaters.add(PayLaterItem(Store.newId(), name, amt, due, accountId, false))
             persist()
             Toast.makeText(this, "PayLater added", Toast.LENGTH_SHORT).show()
-            showTab("calendar")
+            showTab("calendar", 0)
         }
 
         page.addView(sectionTitle(p, "Upcoming"))
@@ -1024,11 +1051,11 @@ class MainActivity : Activity() {
             val btnCol = LinearLayout(this)
             btnCol.orientation = LinearLayout.VERTICAL
             val payBtn = styledButton("Paid", p.good, Color.WHITE)
-            payBtn.setOnClickListener { item.paid = true; persist(); showTab("calendar") }
+            payBtn.setOnClickListener { item.paid = true; persist(); showTab("calendar", 0) }
             btnCol.addView(payBtn)
-            val delBtn = styledButton("Delete", p.bad, Color.WHITE, outline = true)
+            val delBtn = styledButton("Delete", p.bad, p.bad, outline = true)
             delBtn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 8 }
-            delBtn.setOnClickListener { data.paylaters.removeAll { pl -> pl.id == item.id }; persist(); showTab("calendar") }
+            delBtn.setOnClickListener { data.paylaters.removeAll { pl -> pl.id == item.id }; persist(); showTab("calendar", 0) }
             btnCol.addView(delBtn)
             row.addView(btnCol)
 
@@ -1067,13 +1094,13 @@ class MainActivity : Activity() {
         val themes = listOf("light" to "Light", "dark" to "Dark", "sunset" to "Sunset", "ocean" to "Ocean")
         for ((id, label) in themes) {
             val active = data.settings.theme == id
-            val btn = styledButton(label, if (active) p.primary else p.bg, if (active) p.onPrimary else p.text, outline = !active)
+            val btn = styledButton(label, if (active) p.primary else p.text, if (active) p.onPrimary else p.text, outline = !active)
             val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             lp.marginEnd = 8
             btn.layoutParams = lp
             btn.textSize = 12f
             btn.setPadding(8, 22, 8, 22)
-            btn.setOnClickListener { data.settings.theme = id; persist(); showTab("settings") }
+            btn.setOnClickListener { data.settings.theme = id; persist(); showTab("settings", 0) }
             themeRow.addView(btn)
         }
         themeCard.addView(themeRow)
@@ -1092,7 +1119,7 @@ class MainActivity : Activity() {
             dot.layoutParams = dotLp
             dot.background = roundedBg(Color.parseColor(hex), 40f, if (data.settings.customAccent == hex) p.text else null)
             addPressAnim(dot)
-            dot.setOnClickListener { data.settings.customAccent = hex; persist(); showTab("settings") }
+            dot.setOnClickListener { data.settings.customAccent = hex; persist(); showTab("settings", 0) }
             swatchRow.addView(dot)
         }
         themeCard.addView(swatchRow)
@@ -1109,15 +1136,15 @@ class MainActivity : Activity() {
             try {
                 Color.parseColor(hex)
                 data.settings.customAccent = hex
-                persist(); showTab("settings")
+                persist(); showTab("settings", 0)
             } catch (e: Exception) {
                 Toast.makeText(this, "That's not a valid color code", Toast.LENGTH_SHORT).show()
             }
         }
         accentBtnRow.addView(applyBtn)
-        val clearBtn = styledButton("Reset", p.text, p.bg, outline = true)
+        val clearBtn = styledButton("Reset", p.text, p.text, outline = true)
         clearBtn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.marginStart = 10 }
-        clearBtn.setOnClickListener { data.settings.customAccent = null; persist(); showTab("settings") }
+        clearBtn.setOnClickListener { data.settings.customAccent = null; persist(); showTab("settings", 0) }
         accentBtnRow.addView(clearBtn)
         accentBtnRow.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 12 }
         themeCard.addView(accentBtnRow)
@@ -1128,13 +1155,13 @@ class MainActivity : Activity() {
         tabsCard.addView(sectionTitle(p, "Tabs", 0))
         val toggleBtn = styledButton(
             if (data.settings.showPaylaterTab) "Hide PayLater tab" else "Show PayLater tab",
-            p.primary, p.onPrimary, outline = true
+            p.primary, p.primary, outline = true
         )
         toggleBtn.setOnClickListener {
             data.settings.showPaylaterTab = !data.settings.showPaylaterTab
             persist()
             populateNavBar()
-            if (currentTab == "calendar" && !data.settings.showPaylaterTab) showTab("home") else showTab(currentTab)
+            if (currentTab == "calendar" && !data.settings.showPaylaterTab) showTab("home", 0) else showTab(currentTab, 0)
         }
         tabsCard.addView(toggleBtn)
         page.addView(tabsCard)
@@ -1149,15 +1176,15 @@ class MainActivity : Activity() {
             val info = bodyText(p, "${acc.name}\n" + pesoFormat.format(acc.balance))
             info.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             row.addView(info)
-            val editBtn = styledButton("Edit", p.primary, p.onPrimary, outline = true)
+            val editBtn = styledButton("Edit", p.primary, p.primary, outline = true)
             editBtn.setOnClickListener { showEditAccountDialog(acc) }
             row.addView(editBtn)
-            val delBtn = styledButton("Delete", p.bad, Color.WHITE, outline = true)
+            val delBtn = styledButton("Delete", p.bad, p.bad, outline = true)
             delBtn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.marginStart = 8 }
             delBtn.setOnClickListener {
                 data.accounts.removeAll { a -> a.id == acc.id }
                 data.netWorthLog.add(NetWorthEntry(System.currentTimeMillis(), netWorth(), "Deleted account: ${acc.name}"))
-                persist(); showTab("settings")
+                persist(); showTab("settings", 0)
             }
             row.addView(delBtn)
             accCard.addView(row)
@@ -1175,7 +1202,7 @@ class MainActivity : Activity() {
             val balance = newAccBalance.text.toString().toDoubleOrNull() ?: 0.0
             data.accounts.add(Account(Store.newId(), name, balance))
             data.netWorthLog.add(NetWorthEntry(System.currentTimeMillis(), netWorth(), "Added account: $name"))
-            persist(); showTab("settings")
+            persist(); showTab("settings", 0)
         }
         accCard.addView(addAccBtn)
         page.addView(accCard)
@@ -1186,7 +1213,7 @@ class MainActivity : Activity() {
         notifDaysInput.setText(data.settings.notifDaysBefore.toString())
         notifDaysInput.inputType = InputType.TYPE_CLASS_NUMBER
         notifCard.addView(notifDaysInput)
-        val saveNotifBtn = styledButton("Save", p.primary, p.onPrimary, outline = true)
+        val saveNotifBtn = styledButton("Save", p.primary, p.primary, outline = true)
         saveNotifBtn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 12 }
         saveNotifBtn.setOnClickListener {
             data.settings.notifDaysBefore = notifDaysInput.text.toString().toIntOrNull() ?: 2
@@ -1202,12 +1229,12 @@ class MainActivity : Activity() {
 
         val dataCard = card(p)
         dataCard.addView(sectionTitle(p, "Data", 0))
-        val resetBtn = styledButton("Reset all data", p.bad, Color.WHITE, outline = true)
+        val resetBtn = styledButton("Reset all data", p.bad, p.bad, outline = true)
         resetBtn.setOnClickListener {
             val builder = AlertDialog.Builder(this)
                 .setTitle("Reset all data?")
                 .setMessage("This can't be undone.")
-                .setPositiveButton("Reset") { _, _ -> data = Store.defaultData(); persist(); populateNavBar(); showTab("home") }
+                .setPositiveButton("Reset") { _, _ -> data = Store.defaultData(); persist(); populateNavBar(); showTab("home", 0) }
                 .setNegativeButton("Cancel", null)
             showAnimatedDialog(builder)
         }
@@ -1233,7 +1260,7 @@ class MainActivity : Activity() {
                 account.name = nameInput.text.toString().trim().ifEmpty { account.name }
                 account.balance = balanceInput.text.toString().toDoubleOrNull() ?: account.balance
                 data.netWorthLog.add(NetWorthEntry(System.currentTimeMillis(), netWorth(), "Manual balance update"))
-                persist(); showTab("settings")
+                persist(); showTab("settings", 0)
             }
             .setNegativeButton("Cancel", null)
         showAnimatedDialog(builder)
@@ -1306,8 +1333,6 @@ class SimpleLineView(context: Context) : View(context) {
     }
 }
 
-// Detects a horizontal swipe while still letting a vertical ScrollView child
-// handle normal up/down scrolling — same approach ViewPager uses internally.
 class SwipeContainer(context: Context) : FrameLayout(context) {
     var onSwipeLeft: (() -> Unit)? = null
     var onSwipeRight: (() -> Unit)? = null
