@@ -10,9 +10,10 @@ data class Settings(var theme: String = "light", var notifDaysBefore: Int = 2)
 
 data class AppData(
     var accounts: MutableList<Account> = mutableListOf(),
-    var categories: MutableList<Category> = mutableListOf(),
-    var expenses: MutableList<Expense> = mutableListOf(),
-    var goals: MutableList<Goal> = mutableListOf(),
-    var paylaters: MutableList<PayLaterItem> = mutableListOf(),
-    var netWorthLog: MutableList<NetWorthEntry> = mutableListOf(),
-    var settings: Settings = Settings()
+        var categories: MutableList<Category> = mutableListOf(),
+            var expenses: MutableList<Expense> = mutableListOf(),
+                var goals: MutableList<Goal> = mutableListOf(),
+                    var paylaters: MutableList<PayLaterItem> = mutableListOf(),
+                        var netWorthLog: MutableList<NetWorthEntry> = mutableListOf(),
+                            var settings: Settings = Settings()
+                            )
