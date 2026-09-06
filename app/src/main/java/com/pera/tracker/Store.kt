@@ -40,7 +40,7 @@ object Store {
                 Category("shopping", "Shopping", "🛍️", "#E4572E"),
                 Category("health", "Health", "💊", "#7A5195"),
                 Category("fun", "Fun", "🎮", "#0089BA"),
-                Category("paylater", "PayLater", "🧾", "#C05C36"),
+                Category("credit", "Credit", "🧾", "#C05C36"),
                 Category("other", "Other", "📦", "#6B7280")
             )
         )
