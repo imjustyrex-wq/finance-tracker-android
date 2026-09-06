@@ -6,7 +6,12 @@ data class Expense(var id: String, var date: String, var categoryId: String, var
 data class Goal(var id: String, var label: String, var targetAmount: Double, var targetDate: String, var startAmount: Double, var startDate: String)
 data class PayLaterItem(var id: String, var name: String, var amount: Double, var dueDate: String, var accountId: String, var paid: Boolean)
 data class NetWorthEntry(var timestamp: Long, var amount: Double, var note: String)
-data class Settings(var theme: String = "light", var notifDaysBefore: Int = 2, var customAccent: String? = null)
+data class Settings(
+    var theme: String = "light",
+    var notifDaysBefore: Int = 2,
+    var customAccent: String? = null,
+    var showPaylaterTab: Boolean = true
+)
 
 data class AppData(
     var accounts: MutableList<Account> = mutableListOf(),
