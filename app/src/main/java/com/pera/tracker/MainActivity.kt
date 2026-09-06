@@ -11,13 +11,18 @@ import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.PorterDuff
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
+import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.*
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -28,20 +33,22 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 class MainActivity : Activity() {
     private lateinit var data: AppData
-    private lateinit var contentContainer: FrameLayout
+    private lateinit var contentContainer: SwipeContainer
     private lateinit var navBar: LinearLayout
     private var currentTab: String = "home"
     private val pesoFormat: NumberFormat = NumberFormat.getCurrencyInstance(Locale("en", "PH"))
     private val navButtons = mutableMapOf<String, TextView>()
 
-    private val headFont = Typeface.create("sans-serif-medium", Typeface.BOLD)
-    private val bigFont = Typeface.create("sans-serif-black", Typeface.NORMAL)
+    private val headFont = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    private val bigFont = Typeface.create("sans-serif", Typeface.BOLD)
     private val bodyFont = Typeface.create("sans-serif", Typeface.NORMAL)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        window.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN)
         super.onCreate(savedInstanceState)
         actionBar?.hide()
         data = Store.load(this)
@@ -49,19 +56,33 @@ class MainActivity : Activity() {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
 
-        contentContainer = FrameLayout(this)
+        contentContainer = SwipeContainer(this)
         contentContainer.layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
         )
+        contentContainer.onSwipeLeft = { navigateRelative(1) }
+        contentContainer.onSwipeRight = { navigateRelative(-1) }
         root.addView(contentContainer)
-        navBar = buildBottomNav()
+
+        navBar = LinearLayout(this)
+        navBar.orientation = LinearLayout.HORIZONTAL
+        navBar.setPadding(0, 30, 0, 30)
         root.addView(navBar)
+        populateNavBar()
 
         setContentView(root)
         showTab("home")
     }
 
     private fun persist() { Store.save(this, data) }
+
+    private fun navigateRelative(delta: Int) {
+        val items = navItemList().map { it.first }
+        val idx = items.indexOf(currentTab)
+        if (idx == -1) return
+        val newIdx = (idx + delta).coerceIn(0, items.size - 1)
+        if (newIdx != idx) showTab(items[newIdx])
+    }
 
     // ---------- THEMES ----------
     private fun contrastColor(color: Int): Int {
@@ -115,6 +136,24 @@ class MainActivity : Activity() {
         return base
     }
 
+    // ---------- ANIMATION HELPERS ----------
+    private fun addPressAnim(view: View) {
+        view.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> v.animate().scaleX(0.94f).scaleY(0.94f).setDuration(90).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+            }
+            false
+        }
+    }
+
+    private fun showAnimatedDialog(builder: AlertDialog.Builder): AlertDialog {
+        val dialog = builder.create()
+        dialog.window?.attributes?.windowAnimations = R.style.DialogAnimation
+        dialog.show()
+        return dialog
+    }
+
     // ---------- STYLE HELPERS ----------
     private fun roundedBg(color: Int, radius: Float = 24f, strokeColor: Int? = null): GradientDrawable {
         val d = GradientDrawable()
@@ -129,6 +168,7 @@ class MainActivity : Activity() {
         b.text = text
         b.setTextColor(textColor)
         b.typeface = headFont
+        b.textSize = 14f
         b.setPadding(40, 32, 40, 32)
         b.isAllCaps = false
         b.background = if (outline) roundedBg(Color.TRANSPARENT, 24f, bgColor) else roundedBg(bgColor, 24f)
@@ -136,6 +176,7 @@ class MainActivity : Activity() {
         b.stateListAnimator = null
         b.minHeight = 0
         b.minimumHeight = 0
+        addPressAnim(b)
         return b
     }
 
@@ -143,9 +184,10 @@ class MainActivity : Activity() {
         val e = EditText(this)
         e.hint = hint
         e.typeface = bodyFont
+        e.textSize = 15f
         e.setHintTextColor(Color.argb(140, Color.red(p.text), Color.green(p.text), Color.blue(p.text)))
         e.setTextColor(p.text)
-        e.setPadding(28, 24, 28, 24)
+        e.setPadding(28, 26, 28, 26)
         e.background = roundedBg(p.surface, 16f, p.border)
         val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         lp.topMargin = 12
@@ -153,13 +195,35 @@ class MainActivity : Activity() {
         return e
     }
 
+    private fun sectionTitleRow(p: Palette, text: String, topMargin: Int = 40, onEnlarge: (() -> Unit)? = null): LinearLayout {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(0, topMargin, 0, 14)
+        val t = TextView(this)
+        t.text = text
+        t.textSize = 19f
+        t.typeface = headFont
+        t.setTextColor(p.text)
+        t.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        row.addView(t)
+        if (onEnlarge != null) {
+            val btn = styledButton("Enlarge", p.primary, p.onPrimary, outline = true)
+            btn.textSize = 11f
+            btn.setPadding(20, 14, 20, 14)
+            btn.setOnClickListener { onEnlarge() }
+            row.addView(btn)
+        }
+        return row
+    }
+
     private fun sectionTitle(p: Palette, text: String, topMargin: Int = 40): TextView {
         val t = TextView(this)
         t.text = text
-        t.textSize = 17f
+        t.textSize = 19f
         t.typeface = headFont
         t.setTextColor(p.text)
-        t.setPadding(0, topMargin, 0, 12)
+        t.setPadding(0, topMargin, 0, 14)
         return t
     }
 
@@ -174,7 +238,28 @@ class MainActivity : Activity() {
         return c
     }
 
-    // small rounded tile, widget-style, for accounts on Home
+    private fun bodyText(p: Palette, text: String, size: Float = 15f, muted: Boolean = false): TextView {
+        val t = TextView(this)
+        t.text = text
+        t.setTextColor(p.text)
+        t.typeface = bodyFont
+        t.textSize = size
+        if (muted) t.alpha = 0.65f
+        return t
+    }
+
+    private fun makeSpinnerAdapter(items: List<String>, textColor: Int): ArrayAdapter<String> {
+        return object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, items) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = super.getView(position, convertView, parent) as TextView
+                view.setTextColor(textColor)
+                view.typeface = bodyFont
+                view.textSize = 15f
+                return view
+            }
+        }
+    }
+
     private fun accountTile(p: Palette, acc: Account): LinearLayout {
         val t = LinearLayout(this)
         t.orientation = LinearLayout.VERTICAL
@@ -189,7 +274,7 @@ class MainActivity : Activity() {
         name.text = acc.name
         name.setTextColor(p.text)
         name.typeface = bodyFont
-        name.textSize = 12f
+        name.textSize = 13f
         name.alpha = 0.7f
         t.addView(name)
 
@@ -197,11 +282,84 @@ class MainActivity : Activity() {
         bal.text = pesoFormat.format(acc.balance)
         bal.setTextColor(p.text)
         bal.typeface = headFont
-        bal.textSize = 16f
+        bal.textSize = 18f
         bal.setPadding(0, 6, 0, 0)
         t.addView(bal)
 
         return t
+    }
+
+    // colored dot + label + amount + tinted progress bar, used for category breakdowns
+    private fun categoryRow(p: Palette, cat: Category?, amt: Double, pct: Int, big: Boolean): LinearLayout {
+        val wrap = LinearLayout(this)
+        wrap.orientation = LinearLayout.VERTICAL
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = if (big) 20 else 10
+        wrap.layoutParams = lp
+
+        val labelRow = LinearLayout(this)
+        labelRow.orientation = LinearLayout.HORIZONTAL
+        labelRow.gravity = Gravity.CENTER_VERTICAL
+
+        val colorHex = cat?.colorHex ?: "#6B7280"
+        val dot = View(this)
+        val dotSize = if (big) 30 else 22
+        val dotLp = LinearLayout.LayoutParams(dotSize, dotSize)
+        dotLp.marginEnd = 14
+        dot.layoutParams = dotLp
+        dot.background = roundedBg(Color.parseColor(colorHex), dotSize / 2f)
+        labelRow.addView(dot)
+
+        val label = bodyText(p, "${cat?.emoji ?: "📦"} ${cat?.name ?: "Other"}", if (big) 17f else 15f)
+        label.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        labelRow.addView(label)
+
+        val amtText = TextView(this)
+        amtText.text = pesoFormat.format(amt) + "  ($pct%)"
+        amtText.setTextColor(p.text)
+        amtText.typeface = headFont
+        amtText.textSize = if (big) 15f else 13f
+        labelRow.addView(amtText)
+
+        wrap.addView(labelRow)
+
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
+        bar.max = 100
+        bar.progress = pct
+        bar.progressDrawable?.setColorFilter(Color.parseColor(colorHex), PorterDuff.Mode.SRC_IN)
+        val barLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, if (big) 24 else LinearLayout.LayoutParams.WRAP_CONTENT)
+        barLp.topMargin = 6
+        bar.layoutParams = barLp
+        wrap.addView(bar)
+
+        return wrap
+    }
+
+    private fun renderCategoryBreakdown(container: LinearLayout, p: Palette, byCat: Map<String, Double>, total: Double, big: Boolean) {
+        if (byCat.isEmpty()) {
+            container.addView(bodyText(p, "No data yet.", if (big) 16f else 14f, muted = true))
+            return
+        }
+        for ((catId, amt) in byCat.entries.sortedByDescending { it.value }) {
+            val cat = data.categories.find { it.id == catId }
+            val pct = if (total > 0) ((amt / total) * 100).toInt() else 0
+            container.addView(categoryRow(p, cat, amt, pct, big))
+        }
+    }
+
+    private fun showEnlargeDialog(title: String, buildContent: (LinearLayout) -> Unit) {
+        val p = palette()
+        val outer = LinearLayout(this)
+        outer.orientation = LinearLayout.VERTICAL
+        outer.setPadding(20, 10, 20, 10)
+        buildContent(outer)
+        val scroll = ScrollView(this)
+        scroll.addView(outer)
+        val builder = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(scroll)
+            .setPositiveButton("Close", null)
+        showAnimatedDialog(builder)
     }
 
     private fun attachDatePicker(editText: EditText) {
@@ -255,29 +413,31 @@ class MainActivity : Activity() {
         highlightNav()
     }
 
-    private fun buildBottomNav(): LinearLayout {
-        val nav = LinearLayout(this)
-        nav.orientation = LinearLayout.HORIZONTAL
-        nav.setPadding(0, 30, 0, 30)
-        val items = listOf(
-            "home" to "Home", "expenses" to "Expenses", "stats" to "Stats",
-            "goals" to "Goals", "calendar" to "PayLater", "settings" to "Settings"
-        )
-        for ((id, label) in items) {
+    private fun navItemList(): List<Pair<String, String>> {
+        val items = mutableListOf("home" to "Home", "expenses" to "Expenses", "stats" to "Stats", "goals" to "Goals")
+        if (data.settings.showPaylaterTab) items.add("calendar" to "PayLater")
+        items.add("settings" to "Settings")
+        return items
+    }
+
+    private fun populateNavBar() {
+        navBar.removeAllViews()
+        navButtons.clear()
+        for ((id, label) in navItemList()) {
             val tv = TextView(this)
             tv.text = label
-            tv.textSize = 12.5f
+            tv.textSize = 13.5f
             tv.typeface = headFont
             tv.gravity = Gravity.CENTER
-            tv.setPadding(6, 26, 6, 26)
+            tv.setPadding(6, 30, 6, 30)
             tv.isClickable = true
             tv.isFocusable = true
             tv.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             tv.setOnClickListener { showTab(id) }
+            addPressAnim(tv)
             navButtons[id] = tv
-            nav.addView(tv)
+            navBar.addView(tv)
         }
-        return nav
     }
 
     private fun highlightNav() {
@@ -286,6 +446,97 @@ class MainActivity : Activity() {
             view.setTextColor(if (id == currentTab) p.primary else p.text)
             view.alpha = if (id == currentTab) 1f else 0.55f
         }
+    }
+
+    // ---------- QUICK ADD EXPENSE (popup) ----------
+    private fun showAddExpenseDialog() {
+        val p = palette()
+        if (data.accounts.isEmpty()) {
+            Toast.makeText(this, "Add an account first, in Settings", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(48, 30, 48, 10)
+
+        val amountInput = EditText(this)
+        amountInput.hint = "Amount"
+        amountInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        layout.addView(amountInput)
+
+        val catLabel = TextView(this)
+        catLabel.text = "Category"
+        catLabel.setPadding(0, 20, 0, 8)
+        layout.addView(catLabel)
+
+        val catScroll = HorizontalScrollView(this)
+        val catRow = LinearLayout(this)
+        catRow.orientation = LinearLayout.HORIZONTAL
+        catScroll.addView(catRow)
+        layout.addView(catScroll)
+
+        var selectedCategoryId = data.categories.firstOrNull()?.id ?: ""
+        val chipViews = mutableMapOf<String, TextView>()
+        fun styleChip(view: TextView, cat: Category, selected: Boolean) {
+            view.background = roundedBg(if (selected) Color.parseColor(cat.colorHex) else Color.parseColor("#E1E4E0"), 60f)
+            view.setTextColor(if (selected) contrastColor(Color.parseColor(cat.colorHex)) else Color.DKGRAY)
+        }
+        for (cat in data.categories) {
+            val chip = TextView(this)
+            chip.text = "${cat.emoji} ${cat.name}"
+            chip.textSize = 13f
+            chip.setPadding(28, 16, 28, 16)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.marginEnd = 12
+            chip.layoutParams = lp
+            styleChip(chip, cat, cat.id == selectedCategoryId)
+            addPressAnim(chip)
+            chip.setOnClickListener {
+                selectedCategoryId = cat.id
+                for (c in data.categories) chipViews[c.id]?.let { v -> styleChip(v, c, c.id == selectedCategoryId) }
+            }
+            chipViews[cat.id] = chip
+            catRow.addView(chip)
+        }
+
+        val accLabel = TextView(this)
+        accLabel.text = "From account"
+        accLabel.setPadding(0, 20, 0, 8)
+        layout.addView(accLabel)
+
+        val accountSpinner = Spinner(this)
+        accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, data.accounts.map { it.name })
+        layout.addView(accountSpinner)
+
+        val noteInput = EditText(this)
+        noteInput.hint = "Note (optional)"
+        val noteLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        noteLp.topMargin = 16
+        noteInput.layoutParams = noteLp
+        layout.addView(noteInput)
+
+        val scrollWrap = ScrollView(this)
+        scrollWrap.addView(layout)
+
+        val builder = AlertDialog.Builder(this)
+            .setTitle("Add expense")
+            .setView(scrollWrap)
+            .setPositiveButton("Save") { _, _ ->
+                val amt = amountInput.text.toString().toDoubleOrNull()
+                if (amt == null || amt <= 0) { Toast.makeText(this, "Enter a valid amount", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                val accIndex = accountSpinner.selectedItemPosition
+                if (accIndex < 0 || accIndex >= data.accounts.size) { Toast.makeText(this, "Pick an account", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                val account = data.accounts[accIndex]
+                val expense = Expense(Store.newId(), todayString(), selectedCategoryId, amt, noteInput.text.toString(), account.id)
+                account.balance -= amt
+                data.expenses.add(0, expense)
+                data.netWorthLog.add(NetWorthEntry(System.currentTimeMillis(), netWorth(), "Expense"))
+                persist()
+                Toast.makeText(this, "Expense added", Toast.LENGTH_SHORT).show()
+                showTab(currentTab)
+            }
+            .setNegativeButton("Cancel", null)
+        showAnimatedDialog(builder)
     }
 
     // ---------- HOME ----------
@@ -297,18 +548,12 @@ class MainActivity : Activity() {
         page.setPadding(40, 50, 40, 50)
         scroll.addView(page)
 
-        val nwLabel = TextView(this)
-        nwLabel.text = "Net worth"
-        nwLabel.setTextColor(p.text)
-        nwLabel.alpha = 0.7f
-        nwLabel.typeface = bodyFont
-        nwLabel.textSize = 13f
-        page.addView(nwLabel)
+        page.addView(bodyText(p, "Net worth", 14f, muted = true))
 
         val nwValue = TextView(this)
         nwValue.text = pesoFormat.format(netWorth())
         nwValue.setTextColor(p.text)
-        nwValue.textSize = 34f
+        nwValue.textSize = 36f
         nwValue.typeface = bigFont
         page.addView(nwValue)
 
@@ -316,7 +561,7 @@ class MainActivity : Activity() {
         accHeader.text = "Accounts"
         accHeader.setTextColor(p.text)
         accHeader.typeface = headFont
-        accHeader.textSize = 15f
+        accHeader.textSize = 16f
         accHeader.setPadding(0, 30, 0, 4)
         page.addView(accHeader)
 
@@ -342,7 +587,7 @@ class MainActivity : Activity() {
         monthLabel.text = "This month's spending"
         monthLabel.setTextColor(p.text)
         monthLabel.typeface = headFont
-        monthLabel.textSize = 15f
+        monthLabel.textSize = 16f
         monthCard.addView(monthLabel)
 
         val monthPrefix = todayString().substring(0, 7)
@@ -355,35 +600,16 @@ class MainActivity : Activity() {
         totalText.text = "Total: " + pesoFormat.format(total)
         totalText.setTextColor(p.accent)
         totalText.typeface = headFont
+        totalText.textSize = 15f
         totalText.setPadding(0, 8, 0, 8)
         monthCard.addView(totalText)
 
-        if (byCat.isEmpty()) {
-            val empty = TextView(this)
-            empty.text = "No expenses logged yet this month."
-            empty.setTextColor(p.text); empty.alpha = 0.6f
-            monthCard.addView(empty)
-        } else {
-            for ((catId, amt) in byCat.entries.sortedByDescending { it.value }) {
-                val cat = data.categories.find { it.id == catId }
-                val label = TextView(this)
-                label.text = "${cat?.emoji ?: "📦"} ${cat?.name ?: catId}   " + pesoFormat.format(amt)
-                label.setTextColor(p.text)
-                label.typeface = bodyFont
-                label.setPadding(0, 10, 0, 0)
-                monthCard.addView(label)
-                val pct = if (total > 0) ((amt / total) * 100).toInt() else 0
-                val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
-                bar.max = 100
-                bar.progress = pct
-                monthCard.addView(bar)
-            }
-        }
+        renderCategoryBreakdown(monthCard, p, byCat, total, big = false)
         page.addView(monthCard)
 
-        val addBtn = styledButton("+ Add an expense", p.primary, p.onPrimary)
+        val addBtn = styledButton("Add Expense", p.primary, p.onPrimary)
         addBtn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 30 }
-        addBtn.setOnClickListener { showTab("expenses") }
+        addBtn.setOnClickListener { showAddExpenseDialog() }
         page.addView(addBtn)
 
         return scroll
@@ -405,9 +631,7 @@ class MainActivity : Activity() {
         amountInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
         formCard.addView(amountInput)
 
-        val catLabel = TextView(this)
-        catLabel.text = "Category"
-        catLabel.setTextColor(p.text); catLabel.alpha = 0.7f
+        val catLabel = bodyText(p, "Category", 14f, muted = true)
         catLabel.setPadding(0, 20, 0, 8)
         formCard.addView(catLabel)
 
@@ -428,13 +652,14 @@ class MainActivity : Activity() {
         for (cat in data.categories) {
             val chip = TextView(this)
             chip.text = "${cat.emoji} ${cat.name}"
-            chip.textSize = 12f
+            chip.textSize = 13f
             chip.typeface = bodyFont
             chip.setPadding(28, 16, 28, 16)
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             lp.marginEnd = 12
             chip.layoutParams = lp
             styleChip(chip, cat, cat.id == selectedCategoryId)
+            addPressAnim(chip)
             chip.setOnClickListener {
                 selectedCategoryId = cat.id
                 for (c in data.categories) chipViews[c.id]?.let { v -> styleChip(v, c, c.id == selectedCategoryId) }
@@ -443,17 +668,12 @@ class MainActivity : Activity() {
             catRow.addView(chip)
         }
 
-        val accLabel = TextView(this)
-        accLabel.text = "From account"
-        accLabel.setTextColor(p.text); accLabel.alpha = 0.7f
+        val accLabel = bodyText(p, "From account", 14f, muted = true)
         accLabel.setPadding(0, 20, 0, 8)
         formCard.addView(accLabel)
 
         val accountSpinner = Spinner(this)
-        val accountNames = data.accounts.map { it.name }
-        val accAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, accountNames)
-        accAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        accountSpinner.adapter = accAdapter
+        accountSpinner.adapter = makeSpinnerAdapter(data.accounts.map { it.name }, p.text)
         formCard.addView(accountSpinner)
 
         val noteInput = styledEditText(p, "Note (optional)")
@@ -487,10 +707,7 @@ class MainActivity : Activity() {
             row.orientation = LinearLayout.HORIZONTAL
             row.gravity = Gravity.CENTER_VERTICAL
             row.setPadding(0, 10, 0, 10)
-            val label = TextView(this)
-            label.text = "${cat.emoji} ${cat.name}"
-            label.setTextColor(p.text)
-            label.typeface = bodyFont
+            val label = bodyText(p, "${cat.emoji} ${cat.name}")
             label.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             row.addView(label)
             val delBtn = styledButton("Delete", p.bad, Color.WHITE, outline = true)
@@ -515,10 +732,7 @@ class MainActivity : Activity() {
 
         page.addView(sectionTitle(p, "Recent"))
         if (data.expenses.isEmpty()) {
-            val empty = TextView(this)
-            empty.text = "Nothing yet — add your first expense above."
-            empty.setTextColor(p.text); empty.alpha = 0.6f
-            page.addView(empty)
+            page.addView(bodyText(p, "Nothing yet — add your first expense above.", 14f, muted = true))
         }
         for (exp in data.expenses.take(40)) {
             val cat = data.categories.find { it.id == exp.categoryId }
@@ -526,11 +740,8 @@ class MainActivity : Activity() {
             val row = card(p)
             row.orientation = LinearLayout.HORIZONTAL
             row.gravity = Gravity.CENTER_VERTICAL
-            val info = TextView(this)
             val noteOrCat = if (exp.note.isNotBlank()) exp.note else (cat?.name ?: "Expense")
-            info.text = "$noteOrCat\n${exp.date} · $accName · -" + pesoFormat.format(exp.amount)
-            info.setTextColor(p.text)
-            info.typeface = bodyFont
+            val info = bodyText(p, "$noteOrCat\n${exp.date} · $accName · -" + pesoFormat.format(exp.amount))
             info.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             row.addView(info)
             val delBtn = styledButton("Delete", p.bad, Color.WHITE, outline = true)
@@ -560,31 +771,38 @@ class MainActivity : Activity() {
         val monthTotal = monthExpenses.sumOf { it.amount }
 
         val catCard = card(p)
-        catCard.addView(sectionTitle(p, "Spending by category (this month)", 0))
-        if (byCat.isEmpty()) {
-            val empty = TextView(this); empty.text = "No data yet."; empty.setTextColor(p.text); empty.alpha = 0.6f; catCard.addView(empty)
-        } else {
-            for ((catId, amt) in byCat.entries.sortedByDescending { it.value }) {
-                val cat = data.categories.find { it.id == catId }
-                val pct = if (monthTotal > 0) ((amt / monthTotal) * 100).toInt() else 0
-                val label = TextView(this)
-                label.text = "${cat?.emoji ?: "📦"} ${cat?.name ?: catId} — $pct%"
-                label.setTextColor(p.text)
-                label.typeface = bodyFont
-                label.setPadding(0, 10, 0, 0)
-                catCard.addView(label)
-                val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
-                bar.max = 100; bar.progress = pct
-                catCard.addView(bar)
+        catCard.addView(sectionTitleRow(p, "Spending by category (this month)", 0, onEnlarge = {
+            showEnlargeDialog("Spending by category") { container ->
+                renderCategoryBreakdown(container, p, byCat, monthTotal, big = true)
             }
-        }
+        }))
+        renderCategoryBreakdown(catCard, p, byCat, monthTotal, big = false)
         page.addView(catCard)
 
         val nwCard = card(p)
-        nwCard.addView(sectionTitle(p, "Net worth trend", 0))
         val recentLog = data.netWorthLog.takeLast(30)
+        nwCard.addView(sectionTitleRow(p, "Net worth trend", 0, onEnlarge = if (recentLog.size >= 2) {
+            {
+                showEnlargeDialog("Net worth trend") { container ->
+                    val big = SimpleLineView(this)
+                    big.values = recentLog.map { it.amount.toFloat() }
+                    big.lineColor = p.primary
+                    big.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 700)
+                    container.addView(big)
+                    val minV = recentLog.minOf { it.amount }
+                    val maxV = recentLog.maxOf { it.amount }
+                    val rangeRow = LinearLayout(this)
+                    rangeRow.orientation = LinearLayout.HORIZONTAL
+                    val lowText = bodyText(p, "Lowest: " + pesoFormat.format(minV), 14f)
+                    lowText.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    val highText = bodyText(p, "Highest: " + pesoFormat.format(maxV), 14f)
+                    rangeRow.addView(lowText); rangeRow.addView(highText)
+                    container.addView(rangeRow)
+                }
+            }
+        } else null))
         if (recentLog.size < 2) {
-            val empty = TextView(this); empty.text = "Add or spend money a few times to see your trend."; empty.setTextColor(p.text); empty.alpha = 0.6f; nwCard.addView(empty)
+            nwCard.addView(bodyText(p, "Add or spend money a few times to see your trend.", 14f, muted = true))
         } else {
             val sparkline = SimpleLineView(this)
             sparkline.values = recentLog.map { it.amount.toFloat() }
@@ -617,9 +835,10 @@ class MainActivity : Activity() {
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.setPadding(0, 10, 0, 10)
-        val l = TextView(this); l.text = label; l.setTextColor(p.text); l.alpha = 0.7f; l.typeface = bodyFont; l.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        val l = bodyText(p, label, 14f, muted = true)
+        l.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         row.addView(l)
-        val v = TextView(this); v.text = value; v.setTextColor(p.text); v.typeface = headFont
+        val v = TextView(this); v.text = value; v.setTextColor(p.text); v.typeface = headFont; v.textSize = 15f
         row.addView(v)
         page.addView(row)
     }
@@ -675,9 +894,7 @@ class MainActivity : Activity() {
         }
 
         if (data.goals.isEmpty()) {
-            val empty = TextView(this)
-            empty.text = "No goals yet — set one above, like ₱10,000 by end of month."
-            empty.setTextColor(p.text); empty.alpha = 0.6f
+            val empty = bodyText(p, "No goals yet — set one above, like ₱10,000 by end of month.", 14f, muted = true)
             empty.setPadding(0, 30, 0, 0)
             page.addView(empty)
         }
@@ -690,6 +907,7 @@ class MainActivity : Activity() {
             nameText.text = "${goal.label}\nTarget: " + pesoFormat.format(goal.targetAmount) + " by ${goal.targetDate}"
             nameText.setTextColor(p.text)
             nameText.typeface = headFont
+            nameText.textSize = 15f
             nameText.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             nameRow.addView(nameText)
             val delBtn = styledButton("Delete", p.bad, Color.WHITE, outline = true)
@@ -707,29 +925,20 @@ class MainActivity : Activity() {
             bar.layoutParams = barLp
             gcard.addView(bar)
 
-            val progressText = TextView(this)
-            progressText.text = "$progressPct% there · " + pesoFormat.format(if (remaining > 0) remaining else 0.0) + " left"
-            progressText.setTextColor(p.text); progressText.alpha = 0.7f
-            progressText.textSize = 12f
+            val progressText = bodyText(p, "$progressPct% there · " + pesoFormat.format(if (remaining > 0) remaining else 0.0) + " left", 13f, muted = true)
             gcard.addView(progressText)
 
             val daysLeft = daysUntil(goal.targetDate).let { if (it < 1) 1 else it }
             val neededPerDay = if (remaining > 0) remaining / daysLeft else 0.0
-            val perDayText = TextView(this)
-            perDayText.text = if (remaining > 0) "Save " + pesoFormat.format(neededPerDay) + "/day to hit your date" else "Goal reached! 🎉"
-            perDayText.setTextColor(p.text)
-            perDayText.typeface = bodyFont
+            val perDayText = bodyText(p, if (remaining > 0) "Save " + pesoFormat.format(neededPerDay) + "/day to hit your date" else "Goal reached! 🎉", 15f)
             perDayText.setPadding(0, 16, 0, 0)
             gcard.addView(perDayText)
 
-            val paceText = TextView(this)
-            paceText.text = when {
+            val paceText = bodyText(p, when {
                 remaining <= 0 -> "Done"
                 avgDailySavings > 0 -> "At your current pace: ~${Math.ceil(remaining / avgDailySavings).toInt()} days"
                 else -> "At your current pace: not enough history yet"
-            }
-            paceText.setTextColor(p.text); paceText.alpha = 0.7f
-            paceText.textSize = 12f
+            }, 13f, muted = true)
             gcard.addView(paceText)
 
             page.addView(gcard)
@@ -762,17 +971,12 @@ class MainActivity : Activity() {
         attachDatePicker(dueInput)
         formCard.addView(dueInput)
 
-        val accLabel = TextView(this)
-        accLabel.text = "Pay from"
-        accLabel.setTextColor(p.text); accLabel.alpha = 0.7f
+        val accLabel = bodyText(p, "Pay from", 14f, muted = true)
         accLabel.setPadding(0, 20, 0, 8)
         formCard.addView(accLabel)
 
         val accSpinner = Spinner(this)
-        val accNames = data.accounts.map { it.name }
-        val accAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, accNames)
-        accAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        accSpinner.adapter = accAdapter
+        accSpinner.adapter = makeSpinnerAdapter(data.accounts.map { it.name }, p.text)
         formCard.addView(accSpinner)
 
         val addBtn = styledButton("Add due date", p.primary, p.onPrimary)
@@ -799,7 +1003,7 @@ class MainActivity : Activity() {
         val upcoming = sorted.filter { !it.paid }
 
         if (upcoming.isEmpty()) {
-            val empty = TextView(this); empty.text = "Nothing due — you're all clear."; empty.setTextColor(p.text); empty.alpha = 0.6f; page.addView(empty)
+            page.addView(bodyText(p, "Nothing due — you're all clear.", 14f, muted = true))
         }
 
         for (item in upcoming) {
@@ -813,10 +1017,7 @@ class MainActivity : Activity() {
             row.orientation = LinearLayout.HORIZONTAL
             row.gravity = Gravity.CENTER_VERTICAL
 
-            val info = TextView(this)
-            info.text = "${item.name}\nDue ${item.dueDate} · $accName · ${daysLeft}d left\n" + pesoFormat.format(item.amount)
-            info.setTextColor(p.text)
-            info.typeface = bodyFont
+            val info = bodyText(p, "${item.name}\nDue ${item.dueDate} · $accName · ${daysLeft}d left\n" + pesoFormat.format(item.amount))
             info.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             row.addView(info)
 
@@ -839,9 +1040,7 @@ class MainActivity : Activity() {
         if (paidItems.isNotEmpty()) {
             page.addView(sectionTitle(p, "Paid"))
             for (item in paidItems) {
-                val row = TextView(this)
-                row.text = "${item.name} — " + pesoFormat.format(item.amount)
-                row.setTextColor(p.text)
+                val row = bodyText(p, "${item.name} — " + pesoFormat.format(item.amount), 14f)
                 row.alpha = 0.5f
                 page.addView(row)
             }
@@ -872,16 +1071,14 @@ class MainActivity : Activity() {
             val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             lp.marginEnd = 8
             btn.layoutParams = lp
-            btn.textSize = 11f
-            btn.setPadding(8, 20, 8, 20)
+            btn.textSize = 12f
+            btn.setPadding(8, 22, 8, 22)
             btn.setOnClickListener { data.settings.theme = id; persist(); showTab("settings") }
             themeRow.addView(btn)
         }
         themeCard.addView(themeRow)
 
-        val accentLabel = TextView(this)
-        accentLabel.text = "Custom accent color"
-        accentLabel.setTextColor(p.text); accentLabel.alpha = 0.7f
+        val accentLabel = bodyText(p, "Custom accent color", 14f, muted = true)
         accentLabel.setPadding(0, 24, 0, 8)
         themeCard.addView(accentLabel)
 
@@ -890,10 +1087,11 @@ class MainActivity : Activity() {
         val swatches = listOf("#FFB100", "#E4572E", "#2E8B57", "#0369A1", "#7A5195", "#DB2777")
         for (hex in swatches) {
             val dot = View(this)
-            val dotLp = LinearLayout.LayoutParams(70, 70)
+            val dotLp = LinearLayout.LayoutParams(76, 76)
             dotLp.marginEnd = 12
             dot.layoutParams = dotLp
             dot.background = roundedBg(Color.parseColor(hex), 40f, if (data.settings.customAccent == hex) p.text else null)
+            addPressAnim(dot)
             dot.setOnClickListener { data.settings.customAccent = hex; persist(); showTab("settings") }
             swatchRow.addView(dot)
         }
@@ -926,6 +1124,21 @@ class MainActivity : Activity() {
 
         page.addView(themeCard)
 
+        val tabsCard = card(p)
+        tabsCard.addView(sectionTitle(p, "Tabs", 0))
+        val toggleBtn = styledButton(
+            if (data.settings.showPaylaterTab) "Hide PayLater tab" else "Show PayLater tab",
+            p.primary, p.onPrimary, outline = true
+        )
+        toggleBtn.setOnClickListener {
+            data.settings.showPaylaterTab = !data.settings.showPaylaterTab
+            persist()
+            populateNavBar()
+            if (currentTab == "calendar" && !data.settings.showPaylaterTab) showTab("home") else showTab(currentTab)
+        }
+        tabsCard.addView(toggleBtn)
+        page.addView(tabsCard)
+
         val accCard = card(p)
         accCard.addView(sectionTitle(p, "Accounts (net worth: " + pesoFormat.format(netWorth()) + ")", 0))
         for (acc in data.accounts) {
@@ -933,10 +1146,7 @@ class MainActivity : Activity() {
             row.orientation = LinearLayout.HORIZONTAL
             row.gravity = Gravity.CENTER_VERTICAL
             row.setPadding(0, 12, 0, 12)
-            val info = TextView(this)
-            info.text = "${acc.name}\n" + pesoFormat.format(acc.balance)
-            info.setTextColor(p.text)
-            info.typeface = bodyFont
+            val info = bodyText(p, "${acc.name}\n" + pesoFormat.format(acc.balance))
             info.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             row.addView(info)
             val editBtn = styledButton("Edit", p.primary, p.onPrimary, outline = true)
@@ -957,7 +1167,7 @@ class MainActivity : Activity() {
         val newAccBalance = styledEditText(p, "Starting balance")
         newAccBalance.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
         accCard.addView(newAccBalance)
-        val addAccBtn = styledButton("+ Add account", p.primary, p.onPrimary)
+        val addAccBtn = styledButton("Add account", p.primary, p.onPrimary)
         addAccBtn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 16 }
         addAccBtn.setOnClickListener {
             val name = newAccName.text.toString().trim()
@@ -994,12 +1204,12 @@ class MainActivity : Activity() {
         dataCard.addView(sectionTitle(p, "Data", 0))
         val resetBtn = styledButton("Reset all data", p.bad, Color.WHITE, outline = true)
         resetBtn.setOnClickListener {
-            AlertDialog.Builder(this)
+            val builder = AlertDialog.Builder(this)
                 .setTitle("Reset all data?")
                 .setMessage("This can't be undone.")
-                .setPositiveButton("Reset") { _, _ -> data = Store.defaultData(); persist(); showTab("home") }
+                .setPositiveButton("Reset") { _, _ -> data = Store.defaultData(); persist(); populateNavBar(); showTab("home") }
                 .setNegativeButton("Cancel", null)
-                .show()
+            showAnimatedDialog(builder)
         }
         dataCard.addView(resetBtn)
         page.addView(dataCard)
@@ -1016,7 +1226,7 @@ class MainActivity : Activity() {
         balanceInput.setText(account.balance.toString())
         balanceInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
         layout.addView(balanceInput)
-        AlertDialog.Builder(this)
+        val builder = AlertDialog.Builder(this)
             .setTitle("Edit account")
             .setView(layout)
             .setPositiveButton("Save") { _, _ ->
@@ -1026,7 +1236,7 @@ class MainActivity : Activity() {
                 persist(); showTab("settings")
             }
             .setNegativeButton("Cancel", null)
-            .show()
+        showAnimatedDialog(builder)
     }
 
     private fun requestNotificationPermissionAndShow() {
@@ -1093,5 +1303,39 @@ class SimpleLineView(context: Context) : View(context) {
             prevX = x
             prevY = y
         }
+    }
+}
+
+// Detects a horizontal swipe while still letting a vertical ScrollView child
+// handle normal up/down scrolling — same approach ViewPager uses internally.
+class SwipeContainer(context: Context) : FrameLayout(context) {
+    var onSwipeLeft: (() -> Unit)? = null
+    var onSwipeRight: (() -> Unit)? = null
+    private var downX = 0f
+    private var downY = 0f
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private var intercepting = false
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { downX = ev.x; downY = ev.y; intercepting = false }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.x - downX
+                val dy = ev.y - downY
+                if (!intercepting && abs(dx) > touchSlop && abs(dx) > abs(dy)) intercepting = true
+            }
+        }
+        return intercepting
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_UP) {
+            val dx = event.x - downX
+            if (abs(dx) > 120) {
+                if (dx < 0) onSwipeLeft?.invoke() else onSwipeRight?.invoke()
+            }
+            intercepting = false
+        }
+        return true
     }
 }
