@@ -1,6 +1,11 @@
 package com.pera.tracker
 
-data class Account(var id: String, var name: String, var balance: Double)
+data class Account(
+    var id: String, var name: String, var balance: Double,
+    var isSavings: Boolean = false,
+    var interestRatePct: Double = 0.0,
+    var lastAccrualTimestamp: Long = 0L
+)
 data class Category(var id: String, var name: String, var emoji: String, var colorHex: String)
 data class Expense(var id: String, var date: String, var categoryId: String, var amount: Double, var note: String, var accountId: String)
 data class GoalDeposit(var id: String, var timestamp: Long, var amount: Double, var accountId: String)
