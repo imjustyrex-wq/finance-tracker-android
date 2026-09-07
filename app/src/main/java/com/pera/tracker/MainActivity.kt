@@ -246,7 +246,7 @@ class MainActivity : Activity() {
     private fun card(p: Palette): LinearLayout {
         val c = LinearLayout(this)
         c.orientation = LinearLayout.VERTICAL
-        c.baselineAligned = false
+        c.isBaselineAligned = false
         c.setPadding(28, 28, 28, 28)
         c.background = roundedBg(p.surface, 24f, p.border)
         c.elevation = 5f
@@ -268,7 +268,7 @@ class MainActivity : Activity() {
     private fun row(): LinearLayout {
         val r = LinearLayout(this)
         r.orientation = LinearLayout.HORIZONTAL
-        r.baselineAligned = false
+        r.isBaselineAligned = false
         return r
     }
 
