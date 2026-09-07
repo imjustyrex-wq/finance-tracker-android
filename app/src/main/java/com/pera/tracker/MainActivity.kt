@@ -30,7 +30,6 @@ import androidx.core.content.ContextCompat
 import com.github.mikephil.charting.charts.LineChart
 import com.github.mikephil.charting.components.MarkerView
 import com.github.mikephil.charting.components.XAxis
-import com.github.mikephil.charting.components.YAxis
 import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
@@ -52,7 +51,8 @@ class MainActivity : Activity() {
     private val pesoFormat: NumberFormat = NumberFormat.getCurrencyInstance(Locale("en", "PH"))
     private val navButtons = mutableMapOf<String, TextView>()
 
-    private val titleFont = Typeface.create("serif", Typeface.BOLD)
+    // modern, non-serif display font for page titles — heavier weight, not "blocky" body text
+    private val titleFont = Typeface.create("sans-serif-black", Typeface.NORMAL)
     private val headFont = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     private val bigFont = Typeface.create("sans-serif", Typeface.BOLD)
     private val bodyFont = Typeface.create("sans-serif", Typeface.NORMAL)
@@ -92,12 +92,17 @@ class MainActivity : Activity() {
         if (newIdx != idx) showTab(items[newIdx], if (newIdx > idx) 1 else -1)
     }
 
-    // ---------- GOAL AUTO-TILE / AUTO-COMPLETE ----------
+    // ---------- GOAL AUTO-COMPLETE ----------
+    // when a goal's saved amount reaches its target, the saved money is returned
+    // to the first account (it's still the user's money) and the goal + its tile disappear
     private fun checkGoalCompletions() {
-        val nw = netWorth()
-        val done = data.goals.filter { g -> nw - g.startAmount >= (g.targetAmount - g.startAmount) && g.targetAmount != g.startAmount }
+        val done = data.goals.filter { it.savedAmount >= it.targetAmount }
         if (done.isNotEmpty()) {
             for (g in done) {
+                if (data.accounts.isNotEmpty()) {
+                    data.accounts[0].balance += g.savedAmount
+                    logChange("Goal completed: ${g.label} — " + pesoFormat.format(g.savedAmount) + " moved to ${data.accounts[0].name}")
+                }
                 Toast.makeText(this, "🎉 Goal reached: ${g.label}!", Toast.LENGTH_LONG).show()
             }
             data.goals.removeAll { g -> done.any { it.id == g.id } }
@@ -200,13 +205,12 @@ class MainActivity : Activity() {
         return e
     }
 
-    // big, all-caps, distinctly-fonted page header
     private fun pageTitle(p: Palette, text: String): TextView {
         val t = TextView(this)
         t.text = text.uppercase(Locale.US)
         t.typeface = titleFont
-        t.textSize = 22f
-        t.letterSpacing = 0.03f
+        t.textSize = 21f
+        t.letterSpacing = 0.02f
         t.setTextColor(p.text)
         t.setPadding(0, 0, 0, 16)
         return t
@@ -297,13 +301,11 @@ class MainActivity : Activity() {
         t.layoutParams = lp
         val name = TextView(this); name.text = "🎯 ${goal.label}"; name.setTextColor(p.text); name.typeface = bodyFont; name.textSize = 14f; name.alpha = 0.8f
         t.addView(name)
-        val saved = (netWorth() - goal.startAmount).coerceAtLeast(0.0).coerceAtMost(goal.targetAmount - goal.startAmount)
         val bal = TextView(this)
-        bal.text = pesoFormat.format(saved) + " / " + pesoFormat.format(goal.targetAmount - goal.startAmount)
+        bal.text = pesoFormat.format(goal.savedAmount) + " / " + pesoFormat.format(goal.targetAmount)
         bal.setTextColor(p.accent); bal.typeface = headFont; bal.textSize = 16f; bal.setPadding(0, 8, 0, 6)
         t.addView(bal)
-        val denom = (goal.targetAmount - goal.startAmount).let { if (it == 0.0) 1.0 else it }
-        val pct = ((saved / denom) * 100).toInt().coerceIn(0, 100)
+        val pct = if (goal.targetAmount > 0) ((goal.savedAmount / goal.targetAmount) * 100).toInt().coerceIn(0, 100) else 0
         val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
         bar.max = 100; bar.progress = pct
         bar.progressDrawable?.setColorFilter(p.accent, PorterDuff.Mode.SRC_IN)
@@ -391,36 +393,37 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- CHART ----------
+    // ---------- CHART (generic — used for net worth trend AND per-goal progress) ----------
     inner class ChartMarker(context: Context, layoutResource: Int, private val dates: List<String>) : MarkerView(context, layoutResource) {
-        private val tv: TextView = findViewById(R.id.markerText)
+        private val tv: TextView? = findViewById(R.id.markerText)
         override fun refreshContent(e: Entry?, highlight: Highlight?) {
             val idx = (e?.x ?: 0f).toInt()
             val dateStr = dates.getOrNull(idx) ?: ""
-            tv.text = dateStr + "\n" + pesoFormat.format(e?.y ?: 0f)
+            tv?.text = dateStr + "\n" + pesoFormat.format(e?.y ?: 0f)
             super.refreshContent(e, highlight)
         }
         override fun getOffset(): MPPointF = MPPointF(-(width / 2).toFloat(), -height.toFloat() - 20f)
     }
 
-    private fun buildNetWorthChart(entries: List<NetWorthEntry>, p: Palette, heightPx: Int, visibleWindow: Float): LineChart {
+    // points: list of (timestamp millis, value). Renders safely even with 0 or few points.
+    private fun buildLineChart(points: List<Pair<Long, Double>>, p: Palette, heightPx: Int, visibleWindow: Float, lineColor: Int): LineChart {
         val chart = LineChart(this)
         chart.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, heightPx)
 
         val dateFmt = SimpleDateFormat("MMM d", Locale.US)
-        val dateLabels = entries.map { dateFmt.format(Date(it.timestamp)) }
-        val lineEntries = entries.mapIndexed { i, e -> Entry(i.toFloat(), e.amount.toFloat()) }
+        val dateLabels = points.map { dateFmt.format(Date(it.first)) }
+        val lineEntries = points.mapIndexed { i, e -> Entry(i.toFloat(), e.second.toFloat()) }
 
-        val set = LineDataSet(lineEntries, "Net worth")
-        set.color = p.primary
+        val set = LineDataSet(lineEntries, "value")
+        set.color = lineColor
         set.setDrawCircles(true)
-        set.setCircleColor(p.primary)
+        set.setCircleColor(lineColor)
         set.circleRadius = 3.5f
         set.lineWidth = 2.5f
         set.setDrawValues(false)
         set.mode = LineDataSet.Mode.CUBIC_BEZIER
         set.setDrawFilled(true)
-        set.fillColor = p.primary
+        set.fillColor = lineColor
         set.fillAlpha = 40
         set.highLightColor = p.accent
 
@@ -431,7 +434,7 @@ class MainActivity : Activity() {
         chart.isDragEnabled = true
         chart.setScaleEnabled(true)
         chart.setPinchZoom(true)
-        chart.setVisibleXRangeMaximum(visibleWindow.coerceAtMost(entries.size.toFloat()))
+        if (points.size > 1) chart.setVisibleXRangeMaximum(visibleWindow.coerceAtMost(points.size.toFloat()))
         chart.marker = ChartMarker(this, R.layout.marker_view, dateLabels)
         chart.setBackgroundColor(Color.TRANSPARENT)
         chart.setNoDataText("")
@@ -453,13 +456,20 @@ class MainActivity : Activity() {
         yAxisLeft.setDrawGridLines(true)
         yAxisLeft.gridColor = p.border
         yAxisLeft.valueFormatter = object : ValueFormatter() {
-            override fun getFormattedValue(value: Float): String = "₱" + (value / 1000).let {
-                if (it >= 1f || it <= -1f) String.format(Locale.US, "%.1fk", it) else value.toInt().toString()
+            override fun getFormattedValue(value: Float): String {
+                val k = value / 1000f
+                return if (abs(k) >= 1f) "₱" + String.format(Locale.US, "%.1fk", k) else "₱" + value.toInt()
             }
         }
         chart.axisRight.isEnabled = false
 
-        chart.moveViewToX(lineEntries.size.toFloat())
+        // deferred until after layout — calling this immediately crashes MPAndroidChart
+        // because the chart hasn't been measured yet
+        if (points.size > 1) {
+            chart.post {
+                try { chart.moveViewToX(lineEntries.size.toFloat()) } catch (e: Exception) { }
+            }
+        }
         chart.invalidate()
         return chart
     }
@@ -477,7 +487,8 @@ class MainActivity : Activity() {
         } catch (e: Exception) { 0L }
     }
 
-    private fun netWorth(): Double = data.accounts.sumOf { it.balance }
+    // net worth = spendable account balances + whatever is earmarked in goals (still the user's money)
+    private fun netWorth(): Double = data.accounts.sumOf { it.balance } + data.goals.sumOf { it.savedAmount }
 
     private fun logChange(note: String) {
         data.netWorthLog.add(NetWorthEntry(System.currentTimeMillis(), netWorth(), note))
@@ -619,15 +630,13 @@ class MainActivity : Activity() {
         showAnimatedDialog(builder)
     }
 
-    // ---------- ADD FUNDS (deposit/withdraw) ----------
+    // ---------- ADD FUNDS to an account ----------
     private fun showAddFundsDialog(account: Account) {
         val layout = LinearLayout(this)
         layout.orientation = LinearLayout.VERTICAL
         layout.setPadding(40, 30, 40, 10)
-
         val label = TextView(this); label.text = "Adjust ${account.name}"; label.textSize = 15f
         layout.addView(label)
-
         val amountInput = EditText(this); amountInput.hint = "Amount"
         amountInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
         val amtLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT); amtLp.topMargin = 12
@@ -638,19 +647,20 @@ class MainActivity : Activity() {
         val toggleRow = LinearLayout(this); toggleRow.orientation = LinearLayout.HORIZONTAL
         val toggleLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT); toggleLp.topMargin = 16
         toggleRow.layoutParams = toggleLp
-        val depositBtn = styledButton("Deposit +", data.let { palette().good }, Color.WHITE)
-        val withdrawBtn = styledButton("Withdraw -", palette().bad, palette().bad, outline = true)
+        val p = palette()
+        val depositBtn = styledButton("Deposit +", p.good, Color.WHITE)
+        val withdrawBtn = styledButton("Withdraw -", p.bad, p.bad, outline = true)
         depositBtn.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).also { it.marginEnd = 8 }
         withdrawBtn.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         depositBtn.setOnClickListener {
             isDeposit = true
-            depositBtn.background = roundedBg(palette().good, 24f); depositBtn.setTextColor(Color.WHITE)
-            withdrawBtn.background = roundedBg(Color.TRANSPARENT, 24f, palette().bad); withdrawBtn.setTextColor(palette().bad)
+            depositBtn.background = roundedBg(p.good, 24f); depositBtn.setTextColor(Color.WHITE)
+            withdrawBtn.background = roundedBg(Color.TRANSPARENT, 24f, p.bad); withdrawBtn.setTextColor(p.bad)
         }
         withdrawBtn.setOnClickListener {
             isDeposit = false
-            withdrawBtn.background = roundedBg(palette().bad, 24f); withdrawBtn.setTextColor(Color.WHITE)
-            depositBtn.background = roundedBg(Color.TRANSPARENT, 24f, palette().good); depositBtn.setTextColor(palette().good)
+            withdrawBtn.background = roundedBg(p.bad, 24f); withdrawBtn.setTextColor(Color.WHITE)
+            depositBtn.background = roundedBg(Color.TRANSPARENT, 24f, p.good); depositBtn.setTextColor(p.good)
         }
         toggleRow.addView(depositBtn); toggleRow.addView(withdrawBtn)
         layout.addView(toggleRow)
@@ -673,10 +683,10 @@ class MainActivity : Activity() {
     private fun showBalanceHistoryDialog() {
         showEnlargeDialog("Balance history") { container ->
             val entries = data.netWorthLog.asReversed().take(100)
+            val p = palette()
             if (entries.isEmpty()) {
-                container.addView(bodyText(palette(), "No history yet.", 14f, muted = true))
+                container.addView(bodyText(p, "No history yet.", 14f, muted = true))
             } else {
-                val p = palette()
                 val fmt = SimpleDateFormat("MMM d, h:mm a", Locale.US)
                 for (e in entries) {
                     val r = row(); r.setPadding(0, 10, 0, 10)
@@ -686,10 +696,97 @@ class MainActivity : Activity() {
                     val amtText = TextView(this); amtText.text = pesoFormat.format(e.amount); amtText.setTextColor(p.text); amtText.typeface = headFont; amtText.textSize = 13f
                     r.addView(amtText)
                     container.addView(r)
-                    val dateText = bodyText(p, fmt.format(Date(e.timestamp)), 11f, muted = true)
-                    container.addView(dateText)
+                    container.addView(bodyText(p, fmt.format(Date(e.timestamp)), 11f, muted = true))
                 }
             }
+        }
+    }
+
+    // ---------- DEPOSIT TO GOAL ----------
+    private fun showDepositToGoalDialog(goal: Goal) {
+        if (data.accounts.isEmpty()) { Toast.makeText(this, "Add an account first, in Settings", Toast.LENGTH_SHORT).show(); return }
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(40, 30, 40, 10)
+
+        val label = TextView(this); label.text = "Deposit into \"${goal.label}\""; label.textSize = 15f
+        layout.addView(label)
+
+        val amountInput = EditText(this); amountInput.hint = "Amount"
+        amountInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        val amtLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT); amtLp.topMargin = 12
+        amountInput.layoutParams = amtLp
+        layout.addView(amountInput)
+
+        val fromLabel = TextView(this); fromLabel.text = "From account"; fromLabel.setPadding(0, 16, 0, 8)
+        layout.addView(fromLabel)
+        val accSpinner = Spinner(this)
+        accSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, data.accounts.map { "${it.name} (" + pesoFormat.format(it.balance) + ")" })
+        layout.addView(accSpinner)
+
+        val builder = AlertDialog.Builder(this)
+            .setTitle("Deposit to goal")
+            .setView(layout)
+            .setPositiveButton("Deposit") { _, _ ->
+                val amt = amountInput.text.toString().toDoubleOrNull()
+                if (amt == null || amt <= 0) { Toast.makeText(this, "Enter a valid amount", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                val accIndex = accSpinner.selectedItemPosition
+                if (accIndex < 0 || accIndex >= data.accounts.size) { Toast.makeText(this, "Pick an account", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                val account = data.accounts[accIndex]
+                if (account.balance < amt) Toast.makeText(this, "Heads up: more than your ${account.name} balance", Toast.LENGTH_SHORT).show()
+                account.balance -= amt
+                goal.savedAmount += amt
+                goal.depositLog.add(GoalDeposit(Store.newId(), System.currentTimeMillis(), amt, account.id))
+                logChange("Deposit to ${goal.label}: " + pesoFormat.format(amt))
+                persist()
+                Toast.makeText(this, "Deposited " + pesoFormat.format(amt) + " to ${goal.label}", Toast.LENGTH_SHORT).show()
+                showTab("goals", 0)
+            }
+            .setNegativeButton("Cancel", null)
+        showAnimatedDialog(builder)
+    }
+
+    private fun showGoalProgressDialog(goal: Goal) {
+        showEnlargeDialog(goal.label) { container ->
+            val p = palette()
+            val pct = if (goal.targetAmount > 0) ((goal.savedAmount / goal.targetAmount) * 100).toInt().coerceIn(0, 100) else 0
+
+            container.addView(bodyText(p, "$pct% funded", 20f).also { it.typeface = headFont })
+            container.addView(bodyText(p, pesoFormat.format(goal.savedAmount) + " of " + pesoFormat.format(goal.targetAmount), 14f, muted = true).also { it.setPadding(0, 4, 0, 16) })
+
+            if (goal.depositLog.size >= 2) {
+                val sorted = goal.depositLog.sortedBy { it.timestamp }
+                var running = 0.0
+                val points = sorted.map { d -> running += d.amount; d.timestamp to running }
+                container.addView(buildLineChart(points, p, 500, 10f, p.accent))
+                container.addView(bodyText(p, "Tap a point for its value · pinch or drag to explore", 11.5f, muted = true).also { it.setPadding(0, 10, 0, 16) })
+            } else if (goal.depositLog.size == 1) {
+                container.addView(bodyText(p, "Add one more deposit to see a trend chart.", 13f, muted = true).also { it.setPadding(0, 0, 0, 16) })
+            } else {
+                container.addView(bodyText(p, "No deposits yet.", 13f, muted = true).also { it.setPadding(0, 0, 0, 16) })
+            }
+
+            container.addView(sectionTitle(p, "Deposit stats", 0))
+            val numDeposits = goal.depositLog.size
+            val avgDeposit = if (numDeposits > 0) goal.savedAmount / numDeposits else 0.0
+            val firstDeposit = goal.depositLog.minByOrNull { it.timestamp }
+            val daysSinceFirst = firstDeposit?.let { ((System.currentTimeMillis() - it.timestamp) / 86400000.0).coerceAtLeast(1.0) } ?: 1.0
+            val avgPerDay = goal.savedAmount / daysSinceFirst
+
+            val statRow1 = row(); statRow1.setPadding(0, 8, 0, 0)
+            statRow1.addView(bodyText(p, "Deposits made", 13f, muted = true).also { it.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) })
+            statRow1.addView(TextView(this).also { it.text = numDeposits.toString(); it.setTextColor(p.text); it.typeface = headFont })
+            container.addView(statRow1)
+
+            val statRow2 = row(); statRow2.setPadding(0, 8, 0, 0)
+            statRow2.addView(bodyText(p, "Average deposit", 13f, muted = true).also { it.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) })
+            statRow2.addView(TextView(this).also { it.text = pesoFormat.format(avgDeposit); it.setTextColor(p.text); it.typeface = headFont })
+            container.addView(statRow2)
+
+            val statRow3 = row(); statRow3.setPadding(0, 8, 0, 0)
+            statRow3.addView(bodyText(p, "Average per day", 13f, muted = true).also { it.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) })
+            statRow3.addView(TextView(this).also { it.text = pesoFormat.format(avgPerDay); it.setTextColor(p.text); it.typeface = headFont })
+            container.addView(statRow3)
         }
     }
 
@@ -922,10 +1019,8 @@ class MainActivity : Activity() {
         if (recentLog.size < 2) {
             nwCard.addView(bodyText(p, "Add or spend money a few times to see your trend.", 14f, muted = true))
         } else {
-            nwCard.addView(buildNetWorthChart(recentLog, p, 500, 14f))
-            val hint = bodyText(p, "Tap a point for its value · pinch or drag to explore", 11.5f, muted = true)
-            hint.setPadding(0, 10, 0, 0)
-            nwCard.addView(hint)
+            nwCard.addView(buildLineChart(recentLog.map { it.timestamp to it.amount }, p, 500, 14f, p.primary))
+            nwCard.addView(bodyText(p, "Tap a point for its value · pinch or drag to explore", 11.5f, muted = true).also { it.setPadding(0, 10, 0, 0) })
         }
         page.addView(nwCard)
 
@@ -996,23 +1091,14 @@ class MainActivity : Activity() {
             showTab("goals", 0)
         }
 
-        val avgDailySavings: Double = run {
-            val log = data.netWorthLog
-            if (log.size < 2) 0.0 else {
-                val first = log.first(); val last = log.last()
-                val days = (last.timestamp - first.timestamp) / 86400000.0
-                if (days < 1.0) 0.0 else (last.amount - first.amount) / days
-            }
-        }
-
         if (data.goals.isEmpty()) {
-            val empty = bodyText(p, "No goals yet — set one above, like ₱10,000 by end of month. Reaching it removes the goal and its tile automatically.", 14f, muted = true)
+            val empty = bodyText(p, "No goals yet — set one above, like ₱10,000 by end of month. Deposit into it from any account; reaching the target auto-completes and removes it.", 14f, muted = true)
             empty.setPadding(0, 30, 0, 0)
             page.addView(empty)
         }
 
         for (goal in data.goals) {
-            val gcard = card(p)
+            val gcard = tappableCard(p) { showGoalProgressDialog(goal) }
             val nameRow = row()
             val nameText = TextView(this)
             nameText.text = "${goal.label}\nTarget: " + pesoFormat.format(goal.targetAmount) + " by ${goal.targetDate}"
@@ -1024,28 +1110,21 @@ class MainActivity : Activity() {
             nameRow.addView(delBtn)
             gcard.addView(nameRow)
 
-            val remaining = goal.targetAmount - netWorth()
-            val totalNeeded = goal.targetAmount - goal.startAmount
-            val progressPct = if (totalNeeded != 0.0) (((netWorth() - goal.startAmount) / totalNeeded) * 100).toInt().coerceIn(0, 100) else 0
+            val pct = if (goal.targetAmount > 0) ((goal.savedAmount / goal.targetAmount) * 100).toInt().coerceIn(0, 100) else 0
             val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
-            bar.max = 100; bar.progress = progressPct
+            bar.max = 100; bar.progress = pct
             val barLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT); barLp.topMargin = 16
             bar.layoutParams = barLp
             gcard.addView(bar)
 
-            gcard.addView(bodyText(p, "$progressPct% there · " + pesoFormat.format(if (remaining > 0) remaining else 0.0) + " left", 13f, muted = true))
+            gcard.addView(bodyText(p, "$pct% funded · " + pesoFormat.format(goal.savedAmount) + " of " + pesoFormat.format(goal.targetAmount), 13f, muted = true))
 
-            val daysLeft = daysUntil(goal.targetDate).let { if (it < 1) 1 else it }
-            val neededPerDay = if (remaining > 0) remaining / daysLeft else 0.0
-            val perDayText = bodyText(p, if (remaining > 0) "Save " + pesoFormat.format(neededPerDay) + "/day to hit your date" else "Goal reached! 🎉", 15f)
-            perDayText.setPadding(0, 16, 0, 0)
-            gcard.addView(perDayText)
+            val depositBtn = styledButton("Deposit", p.accent, contrastColor(p.accent))
+            depositBtn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 16 }
+            depositBtn.setOnClickListener { showDepositToGoalDialog(goal) }
+            gcard.addView(depositBtn)
 
-            gcard.addView(bodyText(p, when {
-                remaining <= 0 -> "Done"
-                avgDailySavings > 0 -> "At your current pace: ~${Math.ceil(remaining / avgDailySavings).toInt()} days"
-                else -> "At your current pace: not enough history yet"
-            }, 13f, muted = true))
+            gcard.addView(bodyText(p, "Tap card for progress chart & stats", 11.5f, muted = true).also { it.setPadding(0, 10, 0, 0) })
 
             page.addView(gcard)
         }
