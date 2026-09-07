@@ -3,7 +3,13 @@ package com.pera.tracker
 data class Account(var id: String, var name: String, var balance: Double)
 data class Category(var id: String, var name: String, var emoji: String, var colorHex: String)
 data class Expense(var id: String, var date: String, var categoryId: String, var amount: Double, var note: String, var accountId: String)
-data class Goal(var id: String, var label: String, var targetAmount: Double, var targetDate: String, var startAmount: Double, var startDate: String)
+data class GoalDeposit(var id: String, var timestamp: Long, var amount: Double, var accountId: String)
+data class Goal(
+    var id: String, var label: String, var targetAmount: Double, var targetDate: String,
+    var startAmount: Double, var startDate: String,
+    var savedAmount: Double = 0.0,
+    var depositLog: MutableList<GoalDeposit> = mutableListOf()
+)
 data class PayLaterItem(var id: String, var name: String, var amount: Double, var dueDate: String, var accountId: String, var paid: Boolean)
 data class NetWorthEntry(var timestamp: Long, var amount: Double, var note: String)
 data class Settings(
