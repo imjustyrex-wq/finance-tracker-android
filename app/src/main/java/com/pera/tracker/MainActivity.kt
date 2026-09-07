@@ -57,6 +57,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         actionBar?.hide()
         data = Store.load(this)
+        accrueSavingsInterest()
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
@@ -87,6 +88,30 @@ class MainActivity : Activity() {
         if (newIdx != idx) showTab(items[newIdx], if (newIdx > idx) 1 else -1)
     }
 
+    // ---------- SAVINGS INTEREST ----------
+    private fun accrueSavingsInterest() {
+        val now = System.currentTimeMillis()
+        var changed = false
+        for (acc in data.accounts) {
+            if (acc.isSavings && acc.interestRatePct > 0) {
+                if (acc.lastAccrualTimestamp <= 0L) { acc.lastAccrualTimestamp = now; changed = true; continue }
+                val elapsedDays = ((now - acc.lastAccrualTimestamp) / 86400000L).toInt().coerceAtMost(3650)
+                if (elapsedDays >= 1) {
+                    val dailyRate = acc.interestRatePct / 100.0 / 365.0
+                    val before = acc.balance
+                    repeat(elapsedDays) { acc.balance *= (1 + dailyRate) }
+                    acc.lastAccrualTimestamp += elapsedDays.toLong() * 86400000L
+                    val gained = acc.balance - before
+                    if (gained > 0.0001) {
+                        data.netWorthLog.add(NetWorthEntry(now, netWorth(), "Interest: +" + pesoFormat.format(gained) + " · ${acc.name}"))
+                    }
+                    changed = true
+                }
+            }
+        }
+        if (changed) persist()
+    }
+
     // ---------- GOAL AUTO-COMPLETE ----------
     private fun checkGoalCompletions() {
         val done = data.goals.filter { it.savedAmount >= it.targetAmount }
@@ -111,12 +136,16 @@ class MainActivity : Activity() {
     }
 
     private fun palette(): Palette {
-        val isDark = data.settings.theme == "dark"
+        val isDark = data.settings.theme == "dark" || data.settings.theme == "maya"
         val solidText = if (isDark) Color.WHITE else Color.BLACK
         val base = when (data.settings.theme) {
             "dark" -> Palette(Color.parseColor("#0D1B24"), Color.parseColor("#132A38"), solidText, solidText, Color.parseColor("#FFB100"), Color.parseColor("#FFB100"), Color.parseColor("#4ADE80"), Color.parseColor("#FB7185"), Color.parseColor("#233F4F"), Color.parseColor("#0D1B24"))
             "sunset" -> Palette(Color.parseColor("#FFF7ED"), Color.WHITE, solidText, solidText, Color.parseColor("#C2410C"), Color.parseColor("#F59E0B"), Color.parseColor("#16A34A"), Color.parseColor("#DC2626"), Color.parseColor("#FED7AA"), Color.WHITE)
             "ocean" -> Palette(Color.parseColor("#F0F9FF"), Color.WHITE, solidText, solidText, Color.parseColor("#0369A1"), Color.parseColor("#06B6D4"), Color.parseColor("#059669"), Color.parseColor("#DC2626"), Color.parseColor("#BAE6FD"), Color.WHITE)
+            "maya" -> Palette(Color.parseColor("#0B0F0E"), Color.parseColor("#141A18"), solidText, solidText, Color.parseColor("#00D563"), Color.parseColor("#00D563"), Color.parseColor("#00D563"), Color.parseColor("#FF5252"), Color.parseColor("#223028"), Color.BLACK)
+            "gcash" -> Palette(Color.parseColor("#F2F7FF"), Color.WHITE, solidText, solidText, Color.parseColor("#0072CE"), Color.parseColor("#00A3FF"), Color.parseColor("#2E8B57"), Color.parseColor("#E4572E"), Color.parseColor("#D6E4F5"), Color.WHITE)
+            "bpi" -> Palette(Color.parseColor("#FFF5F5"), Color.WHITE, solidText, solidText, Color.parseColor("#C8102E"), Color.parseColor("#F2A900"), Color.parseColor("#2E8B57"), Color.parseColor("#C8102E"), Color.parseColor("#F5D0D0"), Color.WHITE)
+            "bdo" -> Palette(Color.parseColor("#F0F5FF"), Color.WHITE, solidText, solidText, Color.parseColor("#003DA5"), Color.parseColor("#FFC72C"), Color.parseColor("#2E8B57"), Color.parseColor("#E4572E"), Color.parseColor("#D0DDF5"), Color.WHITE)
             else -> Palette(Color.parseColor("#F5F6F4"), Color.WHITE, solidText, solidText, Color.parseColor("#1B3A4B"), Color.parseColor("#FFB100"), Color.parseColor("#2E8B57"), Color.parseColor("#E4572E"), Color.parseColor("#E1E4E0"), Color.WHITE)
         }
         val customHex = data.settings.customAccent
@@ -199,22 +228,28 @@ class MainActivity : Activity() {
         return t
     }
 
-    private fun sectionTitle(p: Palette, text: String, topMargin: Int = 40): TextView {
+    // section header with a small colored accent bar for visual identity
+    private fun sectionTitle(p: Palette, text: String, topMargin: Int = 40): LinearLayout {
+        val r = row()
+        r.gravity = Gravity.CENTER_VERTICAL
+        r.setPadding(0, topMargin, 0, 14)
+        val bar = View(this)
+        bar.layoutParams = LinearLayout.LayoutParams(7, 32).also { it.marginEnd = 10 }
+        bar.background = roundedBg(p.accent, 4f)
+        r.addView(bar)
         val t = TextView(this)
-        t.text = text
-        t.textSize = 18f
-        t.typeface = headFont
-        t.setTextColor(p.text)
-        t.setPadding(0, topMargin, 0, 14)
-        return t
+        t.text = text; t.textSize = 18f; t.typeface = headFont; t.setTextColor(p.text)
+        r.addView(t)
+        return r
     }
 
     private fun card(p: Palette): LinearLayout {
         val c = LinearLayout(this)
         c.orientation = LinearLayout.VERTICAL
-        c.isBaselineAligned = false
+        c.baselineAligned = false
         c.setPadding(28, 28, 28, 28)
         c.background = roundedBg(p.surface, 24f, p.border)
+        c.elevation = 5f
         val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         lp.topMargin = 16
         c.layoutParams = lp
@@ -233,7 +268,7 @@ class MainActivity : Activity() {
     private fun row(): LinearLayout {
         val r = LinearLayout(this)
         r.orientation = LinearLayout.HORIZONTAL
-        r.isBaselineAligned = false
+        r.baselineAligned = false
         return r
     }
 
@@ -263,14 +298,23 @@ class MainActivity : Activity() {
         val t = LinearLayout(this)
         t.orientation = LinearLayout.VERTICAL
         t.setPadding(32, 32, 32, 32)
-        t.background = roundedBg(p.surface, 20f, p.border)
+        t.background = roundedBg(p.surface, 20f, if (acc.isSavings) p.good else p.border)
+        t.elevation = 4f
         val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         lp.marginEnd = 10; lp.marginStart = 10
         t.layoutParams = lp
-        val name = TextView(this); name.text = acc.name; name.setTextColor(p.text); name.typeface = bodyFont; name.textSize = 14f; name.alpha = 0.7f
+        val name = TextView(this)
+        name.text = if (acc.isSavings) "🌱 ${acc.name}" else acc.name
+        name.setTextColor(p.text); name.typeface = bodyFont; name.textSize = 14f; name.alpha = 0.7f
         t.addView(name)
         val bal = TextView(this); bal.text = pesoFormat.format(acc.balance); bal.setTextColor(p.text); bal.typeface = headFont; bal.textSize = 22f; bal.setPadding(0, 8, 0, 0)
         t.addView(bal)
+        if (acc.isSavings) {
+            val rate = bodyText(p, "${acc.interestRatePct}% p.a.", 11f)
+            rate.setTextColor(p.good)
+            rate.setPadding(0, 4, 0, 0)
+            t.addView(rate)
+        }
         return t
     }
 
@@ -279,6 +323,7 @@ class MainActivity : Activity() {
         t.orientation = LinearLayout.VERTICAL
         t.setPadding(32, 32, 32, 32)
         t.background = roundedBg(p.surface, 20f, p.accent)
+        t.elevation = 4f
         val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         lp.marginEnd = 10; lp.marginStart = 10
         t.layoutParams = lp
@@ -436,7 +481,7 @@ class MainActivity : Activity() {
     }
 
     private fun navItemList(): List<Pair<String, String>> {
-        val items = mutableListOf("home" to "Home", "expenses" to "Expenses", "stats" to "Stats", "goals" to "Goals")
+        val items = mutableListOf("home" to "Home", "expenses" to "Categories", "stats" to "Stats", "goals" to "Goals")
         if (data.settings.showPaylaterTab) items.add("calendar" to "Credit")
         items.add("settings" to "Settings")
         return items
@@ -470,7 +515,7 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- QUICK ADD EXPENSE (popup) ----------
+    // ---------- QUICK ADD EXPENSE (popup — this is now the ONLY way to add expenses) ----------
     private fun showAddExpenseDialog() {
         if (data.accounts.isEmpty()) { Toast.makeText(this, "Add an account first, in Settings", Toast.LENGTH_SHORT).show(); return }
         val layout = LinearLayout(this)
@@ -774,7 +819,7 @@ class MainActivity : Activity() {
         return scroll
     }
 
-    // ---------- EXPENSES ----------
+    // ---------- CATEGORIES (formerly "Expenses" — adding now happens only from Home) ----------
     private fun buildExpenses(): View {
         val p = palette()
         val scroll = ScrollView(this)
@@ -783,78 +828,8 @@ class MainActivity : Activity() {
         page.setPadding(40, 50, 40, 50)
         scroll.addView(page)
 
-        page.addView(pageTitle(p, "Add expense"))
-        val formCard = card(p)
-
-        val amountInput = styledEditText(p, "Amount")
-        amountInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-        formCard.addView(amountInput)
-
-        val catLabel = bodyText(p, "Category (swipe for more →)", 14f, muted = true)
-        catLabel.setPadding(0, 20, 0, 8)
-        formCard.addView(catLabel)
-
-        val catScroll = HorizontalScrollView(this)
-        catScroll.setPadding(0, 6, 0, 6)
-        catScroll.isHorizontalScrollBarEnabled = true
-        catScroll.isScrollbarFadingEnabled = false
-        val catRow = LinearLayout(this); catRow.orientation = LinearLayout.HORIZONTAL
-        catScroll.addView(catRow)
-        formCard.addView(catScroll)
-        // tell the outer swipe-between-tabs system: never claim gestures that start on this scroller
-        contentContainer.registerExemptView(catScroll)
-
-        var selectedCategoryId = data.categories.firstOrNull()?.id ?: ""
-        val chipViews = mutableMapOf<String, TextView>()
-        fun styleChip(view: TextView, cat: Category, selected: Boolean) {
-            view.background = roundedBg(if (selected) Color.parseColor(cat.colorHex) else p.bg, 60f, if (selected) null else p.border)
-            view.setTextColor(if (selected) contrastColor(Color.parseColor(cat.colorHex)) else p.text)
-        }
-        for (cat in data.categories) {
-            val chip = TextView(this)
-            chip.text = "${cat.emoji} ${cat.name}"; chip.textSize = 15f; chip.typeface = bodyFont; chip.setPadding(32, 22, 32, 22)
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT); lp.marginEnd = 12
-            chip.layoutParams = lp
-            styleChip(chip, cat, cat.id == selectedCategoryId)
-            addPressAnim(chip)
-            chip.setOnClickListener {
-                selectedCategoryId = cat.id
-                for (c in data.categories) chipViews[c.id]?.let { v -> styleChip(v, c, c.id == selectedCategoryId) }
-            }
-            chipViews[cat.id] = chip
-            catRow.addView(chip)
-        }
-
-        val accLabel = bodyText(p, "From account", 14f, muted = true)
-        accLabel.setPadding(0, 20, 0, 8)
-        formCard.addView(accLabel)
-        val accountSpinner = Spinner(this)
-        accountSpinner.adapter = makeSpinnerAdapter(data.accounts.map { it.name }, p.text)
-        formCard.addView(accountSpinner)
-
-        val noteInput = styledEditText(p, "Note (optional)")
-        formCard.addView(noteInput)
-
-        val addBtn = styledButton("Save expense", p.accent, contrastColor(p.accent))
-        addBtn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 20 }
-        formCard.addView(addBtn)
-        page.addView(formCard)
-
-        addBtn.setOnClickListener {
-            val amt = amountInput.text.toString().toDoubleOrNull()
-            if (amt == null || amt <= 0) { Toast.makeText(this, "Enter a valid amount", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            if (data.accounts.isEmpty()) { Toast.makeText(this, "Add an account first, in Settings", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            val accIndex = accountSpinner.selectedItemPosition
-            if (accIndex < 0 || accIndex >= data.accounts.size) { Toast.makeText(this, "Pick an account", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            val account = data.accounts[accIndex]
-            val expense = Expense(Store.newId(), todayString(), selectedCategoryId, amt, noteInput.text.toString(), account.id)
-            account.balance -= amt
-            data.expenses.add(0, expense)
-            logChange("Expense: " + (noteInput.text.toString().ifBlank { selectedCategoryId }))
-            persist()
-            Toast.makeText(this, "Expense added", Toast.LENGTH_SHORT).show()
-            showTab("expenses", 0)
-        }
+        page.addView(pageTitle(p, "Categories"))
+        page.addView(bodyText(p, "Manage your spending categories here. Add new expenses from the Home tab.", 13f, muted = true).also { it.setPadding(0, 0, 0, 8) })
 
         page.addView(sectionTitle(p, "Manage categories"))
         val catCard = card(p)
@@ -882,8 +857,8 @@ class MainActivity : Activity() {
         catCard.addView(addCatBtn)
         page.addView(catCard)
 
-        page.addView(sectionTitle(p, "Recent"))
-        if (data.expenses.isEmpty()) page.addView(bodyText(p, "Nothing yet — add your first expense above.", 14f, muted = true))
+        page.addView(sectionTitle(p, "Recent expenses"))
+        if (data.expenses.isEmpty()) page.addView(bodyText(p, "Nothing yet — add your first expense from the Home tab.", 14f, muted = true))
         for (exp in data.expenses.take(40)) {
             val cat = data.categories.find { it.id == exp.categoryId }
             val accName = data.accounts.find { it.id == exp.accountId }?.name ?: "Deleted account"
@@ -1148,17 +1123,23 @@ class MainActivity : Activity() {
 
         val themeCard = card(p)
         themeCard.addView(sectionTitle(p, "Theme", 0))
-        val themeRow = row()
-        val themes = listOf("light" to "Light", "dark" to "Dark", "sunset" to "Sunset", "ocean" to "Ocean")
-        for ((id, label) in themes) {
-            val active = data.settings.theme == id
-            val btn = styledButton(label, if (active) p.primary else p.text, if (active) p.onPrimary else p.text, outline = !active)
-            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f); lp.marginEnd = 8
-            btn.layoutParams = lp; btn.textSize = 12f; btn.setPadding(8, 22, 8, 22)
-            btn.setOnClickListener { data.settings.theme = id; persist(); showTab("settings", 0) }
-            themeRow.addView(btn)
+        val themes = listOf(
+            "light" to "Light", "dark" to "Dark", "sunset" to "Sunset", "ocean" to "Ocean",
+            "maya" to "Maya", "gcash" to "GCash", "bpi" to "BPI", "bdo" to "BDO"
+        )
+        for (chunk in themes.chunked(4)) {
+            val themeRow = row()
+            themeRow.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 8 }
+            for ((id, label) in chunk) {
+                val active = data.settings.theme == id
+                val btn = styledButton(label, if (active) p.primary else p.text, if (active) p.onPrimary else p.text, outline = !active)
+                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f); lp.marginEnd = 8
+                btn.layoutParams = lp; btn.textSize = 12f; btn.setPadding(6, 20, 6, 20)
+                btn.setOnClickListener { data.settings.theme = id; persist(); showTab("settings", 0) }
+                themeRow.addView(btn)
+            }
+            themeCard.addView(themeRow)
         }
-        themeCard.addView(themeRow)
 
         val accentLabel = bodyText(p, "Custom accent color", 14f, muted = true)
         accentLabel.setPadding(0, 24, 0, 8)
@@ -1208,7 +1189,8 @@ class MainActivity : Activity() {
         accCard.addView(sectionTitle(p, "Accounts (net worth: " + pesoFormat.format(netWorth()) + ")", 0))
         for (acc in data.accounts) {
             val r = row(); r.gravity = Gravity.CENTER_VERTICAL; r.setPadding(0, 12, 0, 12)
-            val info = bodyText(p, "${acc.name}\n" + pesoFormat.format(acc.balance))
+            val infoText = if (acc.isSavings) "${acc.name} 🌱\n" + pesoFormat.format(acc.balance) + " · ${acc.interestRatePct}% p.a." else "${acc.name}\n" + pesoFormat.format(acc.balance)
+            val info = bodyText(p, infoText)
             info.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             r.addView(info)
             val fundsBtn = styledButton("+/-", p.good, p.good, outline = true)
@@ -1228,18 +1210,47 @@ class MainActivity : Activity() {
             r.addView(delBtn)
             accCard.addView(r)
         }
+
         val newAccName = styledEditText(p, "New account name (e.g. BPI, Savings jar)")
         accCard.addView(newAccName)
         val newAccBalance = styledEditText(p, "Starting balance")
         newAccBalance.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
         accCard.addView(newAccBalance)
+
+        var isSavingsType = false
+        val typeRow = row()
+        typeRow.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 12 }
+        val regularBtn = styledButton("Regular", p.primary, p.onPrimary)
+        val savingsBtn = styledButton("Savings (interest)", p.primary, p.primary, outline = true)
+        regularBtn.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).also { it.marginEnd = 8 }
+        savingsBtn.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        val interestInput = styledEditText(p, "Interest rate % per year (e.g. 3.5)")
+        interestInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        interestInput.visibility = View.GONE
+        regularBtn.setOnClickListener {
+            isSavingsType = false
+            regularBtn.background = roundedBg(p.primary, 24f); regularBtn.setTextColor(p.onPrimary)
+            savingsBtn.background = roundedBg(Color.TRANSPARENT, 24f, p.primary); savingsBtn.setTextColor(p.primary)
+            interestInput.visibility = View.GONE
+        }
+        savingsBtn.setOnClickListener {
+            isSavingsType = true
+            savingsBtn.background = roundedBg(p.primary, 24f); savingsBtn.setTextColor(p.onPrimary)
+            regularBtn.background = roundedBg(Color.TRANSPARENT, 24f, p.primary); regularBtn.setTextColor(p.primary)
+            interestInput.visibility = View.VISIBLE
+        }
+        typeRow.addView(regularBtn); typeRow.addView(savingsBtn)
+        accCard.addView(typeRow)
+        accCard.addView(interestInput)
+
         val addAccBtn = styledButton("Add account", p.primary, p.onPrimary)
         addAccBtn.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 16 }
         addAccBtn.setOnClickListener {
             val name = newAccName.text.toString().trim()
             if (name.isEmpty()) { Toast.makeText(this, "Give the account a name", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
             val balance = newAccBalance.text.toString().toDoubleOrNull() ?: 0.0
-            data.accounts.add(Account(Store.newId(), name, balance))
+            val rate = if (isSavingsType) (interestInput.text.toString().toDoubleOrNull() ?: 0.0) else 0.0
+            data.accounts.add(Account(Store.newId(), name, balance, isSavingsType, rate, System.currentTimeMillis()))
             logChange("Added account: $name")
             persist(); showTab("settings", 0)
         }
@@ -1299,6 +1310,27 @@ class MainActivity : Activity() {
         balanceInput.setText(account.balance.toString())
         balanceInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
         layout.addView(balanceInput)
+        if (account.isSavings) {
+            val rateLabel = TextView(this); rateLabel.text = "Interest rate % per year"; rateLabel.setPadding(0, 16, 0, 4)
+            layout.addView(rateLabel)
+            val rateInput = EditText(this)
+            rateInput.setText(account.interestRatePct.toString())
+            rateInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            layout.addView(rateInput)
+            val builder = AlertDialog.Builder(this)
+                .setTitle("Edit account")
+                .setView(layout)
+                .setPositiveButton("Save") { _, _ ->
+                    account.name = nameInput.text.toString().trim().ifEmpty { account.name }
+                    account.balance = balanceInput.text.toString().toDoubleOrNull() ?: account.balance
+                    account.interestRatePct = rateInput.text.toString().toDoubleOrNull() ?: account.interestRatePct
+                    logChange("Manual balance update: ${account.name}")
+                    persist(); showTab("settings", 0)
+                }
+                .setNegativeButton("Cancel", null)
+            showAnimatedDialog(builder)
+            return
+        }
         val builder = AlertDialog.Builder(this)
             .setTitle("Edit account")
             .setView(layout)
@@ -1348,9 +1380,6 @@ data class Palette(
     val onPrimary: Int
 )
 
-// custom-drawn line chart: axes, tap-for-value tooltip, drag-to-scroll through history.
-// no external library — draws with plain Canvas, so nothing can break from a mismatched
-// dependency or an unmeasured-view timing issue.
 class InteractiveLineChart(context: Context) : View(context) {
     var points: List<Pair<Long, Double>> = emptyList()
         set(value) {
@@ -1509,9 +1538,6 @@ class InteractiveLineChart(context: Context) : View(context) {
     }
 }
 
-// swipe-between-tabs container. Exempt views (like the category chip scroller) are
-// checked by their actual on-screen position at the moment of touch-down, so a
-// gesture that starts on them is never claimed for tab-switching, regardless of timing.
 class SwipeContainer(context: Context) : FrameLayout(context) {
     var onSwipeLeft: (() -> Unit)? = null
     var onSwipeRight: (() -> Unit)? = null
