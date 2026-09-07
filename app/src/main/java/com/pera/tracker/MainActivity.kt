@@ -8,8 +8,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PorterDuff
+import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -27,15 +32,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import com.github.mikephil.charting.charts.LineChart
-import com.github.mikephil.charting.components.MarkerView
-import com.github.mikephil.charting.components.XAxis
-import com.github.mikephil.charting.data.Entry
-import com.github.mikephil.charting.data.LineData
-import com.github.mikephil.charting.data.LineDataSet
-import com.github.mikephil.charting.formatter.ValueFormatter
-import com.github.mikephil.charting.highlight.Highlight
-import com.github.mikephil.charting.utils.MPPointF
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -51,7 +47,6 @@ class MainActivity : Activity() {
     private val pesoFormat: NumberFormat = NumberFormat.getCurrencyInstance(Locale("en", "PH"))
     private val navButtons = mutableMapOf<String, TextView>()
 
-    // modern, non-serif display font for page titles — heavier weight, not "blocky" body text
     private val titleFont = Typeface.create("sans-serif-black", Typeface.NORMAL)
     private val headFont = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     private val bigFont = Typeface.create("sans-serif", Typeface.BOLD)
@@ -93,8 +88,6 @@ class MainActivity : Activity() {
     }
 
     // ---------- GOAL AUTO-COMPLETE ----------
-    // when a goal's saved amount reaches its target, the saved money is returned
-    // to the first account (it's still the user's money) and the goal + its tile disappear
     private fun checkGoalCompletions() {
         val done = data.goals.filter { it.savedAmount >= it.targetAmount }
         if (done.isNotEmpty()) {
@@ -142,16 +135,6 @@ class MainActivity : Activity() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> v.animate().scaleX(0.94f).scaleY(0.94f).setDuration(90).start()
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
-            }
-            false
-        }
-    }
-
-    private fun exemptFromSwipe(view: View) {
-        view.setOnTouchListener { v, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> v.parent?.requestDisallowInterceptTouchEvent(true)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.parent?.requestDisallowInterceptTouchEvent(false)
             }
             false
         }
@@ -393,84 +376,14 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- CHART (generic — used for net worth trend AND per-goal progress) ----------
-    inner class ChartMarker(context: Context, layoutResource: Int, private val dates: List<String>) : MarkerView(context, layoutResource) {
-        private val tv: TextView? = findViewById(R.id.markerText)
-        override fun refreshContent(e: Entry?, highlight: Highlight?) {
-            val idx = (e?.x ?: 0f).toInt()
-            val dateStr = dates.getOrNull(idx) ?: ""
-            tv?.text = dateStr + "\n" + pesoFormat.format(e?.y ?: 0f)
-            super.refreshContent(e, highlight)
-        }
-        override fun getOffset(): MPPointF = MPPointF(-(width / 2).toFloat(), -height.toFloat() - 20f)
-    }
-
-    // points: list of (timestamp millis, value). Renders safely even with 0 or few points.
-    private fun buildLineChart(points: List<Pair<Long, Double>>, p: Palette, heightPx: Int, visibleWindow: Float, lineColor: Int): LineChart {
-        val chart = LineChart(this)
+    // ---------- CHART (custom-drawn, no external library) ----------
+    private fun buildChartView(points: List<Pair<Long, Double>>, p: Palette, heightPx: Int, color: Int): InteractiveLineChart {
+        val chart = InteractiveLineChart(this)
         chart.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, heightPx)
-
-        val dateFmt = SimpleDateFormat("MMM d", Locale.US)
-        val dateLabels = points.map { dateFmt.format(Date(it.first)) }
-        val lineEntries = points.mapIndexed { i, e -> Entry(i.toFloat(), e.second.toFloat()) }
-
-        val set = LineDataSet(lineEntries, "value")
-        set.color = lineColor
-        set.setDrawCircles(true)
-        set.setCircleColor(lineColor)
-        set.circleRadius = 3.5f
-        set.lineWidth = 2.5f
-        set.setDrawValues(false)
-        set.mode = LineDataSet.Mode.CUBIC_BEZIER
-        set.setDrawFilled(true)
-        set.fillColor = lineColor
-        set.fillAlpha = 40
-        set.highLightColor = p.accent
-
-        chart.data = LineData(set)
-        chart.description.isEnabled = false
-        chart.legend.isEnabled = false
-        chart.setTouchEnabled(true)
-        chart.isDragEnabled = true
-        chart.setScaleEnabled(true)
-        chart.setPinchZoom(true)
-        if (points.size > 1) chart.setVisibleXRangeMaximum(visibleWindow.coerceAtMost(points.size.toFloat()))
-        chart.marker = ChartMarker(this, R.layout.marker_view, dateLabels)
-        chart.setBackgroundColor(Color.TRANSPARENT)
-        chart.setNoDataText("")
-
-        val xAxis = chart.xAxis
-        xAxis.position = XAxis.XAxisPosition.BOTTOM
-        xAxis.granularity = 1f
-        xAxis.textColor = p.text
-        xAxis.textSize = 10f
-        xAxis.setDrawGridLines(false)
-        xAxis.labelRotationAngle = -35f
-        xAxis.valueFormatter = object : ValueFormatter() {
-            override fun getFormattedValue(value: Float): String = dateLabels.getOrNull(value.toInt()) ?: ""
-        }
-
-        val yAxisLeft = chart.axisLeft
-        yAxisLeft.textColor = p.text
-        yAxisLeft.textSize = 10f
-        yAxisLeft.setDrawGridLines(true)
-        yAxisLeft.gridColor = p.border
-        yAxisLeft.valueFormatter = object : ValueFormatter() {
-            override fun getFormattedValue(value: Float): String {
-                val k = value / 1000f
-                return if (abs(k) >= 1f) "₱" + String.format(Locale.US, "%.1fk", k) else "₱" + value.toInt()
-            }
-        }
-        chart.axisRight.isEnabled = false
-
-        // deferred until after layout — calling this immediately crashes MPAndroidChart
-        // because the chart hasn't been measured yet
-        if (points.size > 1) {
-            chart.post {
-                try { chart.moveViewToX(lineEntries.size.toFloat()) } catch (e: Exception) { }
-            }
-        }
-        chart.invalidate()
+        chart.lineColor = color
+        chart.textColor = p.text
+        chart.gridColor = p.border
+        chart.points = points
         return chart
     }
 
@@ -487,7 +400,6 @@ class MainActivity : Activity() {
         } catch (e: Exception) { 0L }
     }
 
-    // net worth = spendable account balances + whatever is earmarked in goals (still the user's money)
     private fun netWorth(): Double = data.accounts.sumOf { it.balance } + data.goals.sumOf { it.savedAmount }
 
     private fun logChange(note: String) {
@@ -498,6 +410,7 @@ class MainActivity : Activity() {
         checkGoalCompletions()
         currentTab = tab
         contentContainer.removeAllViews()
+        contentContainer.clearExemptViews()
         val p = palette()
         val view = when (tab) {
             "home" -> buildHome()
@@ -758,8 +671,8 @@ class MainActivity : Activity() {
                 val sorted = goal.depositLog.sortedBy { it.timestamp }
                 var running = 0.0
                 val points = sorted.map { d -> running += d.amount; d.timestamp to running }
-                container.addView(buildLineChart(points, p, 500, 10f, p.accent))
-                container.addView(bodyText(p, "Tap a point for its value · pinch or drag to explore", 11.5f, muted = true).also { it.setPadding(0, 10, 0, 16) })
+                container.addView(buildChartView(points, p, 480, p.accent))
+                container.addView(bodyText(p, "Tap a point for its value · drag to scroll through history", 11.5f, muted = true).also { it.setPadding(0, 10, 0, 16) })
             } else if (goal.depositLog.size == 1) {
                 container.addView(bodyText(p, "Add one more deposit to see a trend chart.", 13f, muted = true).also { it.setPadding(0, 0, 0, 16) })
             } else {
@@ -885,10 +798,11 @@ class MainActivity : Activity() {
         catScroll.setPadding(0, 6, 0, 6)
         catScroll.isHorizontalScrollBarEnabled = true
         catScroll.isScrollbarFadingEnabled = false
-        exemptFromSwipe(catScroll)
         val catRow = LinearLayout(this); catRow.orientation = LinearLayout.HORIZONTAL
         catScroll.addView(catRow)
         formCard.addView(catScroll)
+        // tell the outer swipe-between-tabs system: never claim gestures that start on this scroller
+        contentContainer.registerExemptView(catScroll)
 
         var selectedCategoryId = data.categories.firstOrNull()?.id ?: ""
         val chipViews = mutableMapOf<String, TextView>()
@@ -1019,8 +933,8 @@ class MainActivity : Activity() {
         if (recentLog.size < 2) {
             nwCard.addView(bodyText(p, "Add or spend money a few times to see your trend.", 14f, muted = true))
         } else {
-            nwCard.addView(buildLineChart(recentLog.map { it.timestamp to it.amount }, p, 500, 14f, p.primary))
-            nwCard.addView(bodyText(p, "Tap a point for its value · pinch or drag to explore", 11.5f, muted = true).also { it.setPadding(0, 10, 0, 0) })
+            nwCard.addView(buildChartView(recentLog.map { it.timestamp to it.amount }, p, 480, p.primary))
+            nwCard.addView(bodyText(p, "Tap a point for its value · drag to scroll through history", 11.5f, muted = true).also { it.setPadding(0, 10, 0, 0) })
         }
         page.addView(nwCard)
 
@@ -1434,6 +1348,170 @@ data class Palette(
     val onPrimary: Int
 )
 
+// custom-drawn line chart: axes, tap-for-value tooltip, drag-to-scroll through history.
+// no external library — draws with plain Canvas, so nothing can break from a mismatched
+// dependency or an unmeasured-view timing issue.
+class InteractiveLineChart(context: Context) : View(context) {
+    var points: List<Pair<Long, Double>> = emptyList()
+        set(value) {
+            field = value
+            scrollIndex = (value.size - visibleCount()).coerceAtLeast(0).toFloat()
+            selectedIndex = null
+            invalidate()
+        }
+    var lineColor: Int = Color.parseColor("#1B3A4B")
+    var textColor: Int = Color.BLACK
+    var gridColor: Int = Color.LTGRAY
+    var maxVisible: Int = 14
+
+    private var scrollIndex = 0f
+    private var selectedIndex: Int? = null
+    private var downX = 0f
+    private var lastX = 0f
+    private var dragging = false
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val dateFmt = SimpleDateFormat("MMM d", Locale.US)
+    private val pesoFmt = NumberFormat.getCurrencyInstance(Locale("en", "PH"))
+
+    private fun visibleCount(): Int = minOf(maxVisible, points.size).coerceAtLeast(1)
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x; lastX = event.x; dragging = false
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!dragging && abs(event.x - downX) > touchSlop) dragging = true
+                if (dragging && points.size > visibleCount()) {
+                    val stepPx = width.toFloat() / visibleCount()
+                    if (stepPx > 0f) {
+                        val deltaIdx = (lastX - event.x) / stepPx
+                        scrollIndex = (scrollIndex + deltaIdx).coerceIn(0f, (points.size - visibleCount()).toFloat())
+                        invalidate()
+                    }
+                }
+                lastX = event.x
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                if (!dragging) {
+                    selectedIndex = nearestIndex(event.x)
+                    invalidate()
+                }
+            }
+        }
+        return true
+    }
+
+    private fun nearestIndex(x: Float): Int? {
+        if (points.isEmpty()) return null
+        val start = scrollIndex.toInt()
+        val count = visibleCount()
+        val end = (start + count).coerceAtMost(points.size)
+        val chartLeft = 110f
+        val chartRight = width.toFloat() - 20f
+        val denom = (end - start - 1).coerceAtLeast(1)
+        val stepPx = (chartRight - chartLeft) / denom
+        var best = start
+        var bestDist = Float.MAX_VALUE
+        for (i in start until end) {
+            val px = chartLeft + (i - start) * stepPx
+            val dist = abs(px - x)
+            if (dist < bestDist) { bestDist = dist; best = i }
+        }
+        return best
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (points.size < 2 || width == 0 || height == 0) return
+
+        val start = scrollIndex.toInt()
+        val count = visibleCount()
+        val end = (start + count).coerceAtMost(points.size)
+        val visible = points.subList(start, end)
+        if (visible.size < 2) return
+
+        val chartLeft = 110f
+        val chartRight = width.toFloat() - 20f
+        val chartTop = 20f
+        val chartBottom = height.toFloat() - 60f
+
+        val minV = visible.minOf { it.second }
+        val maxV = visible.maxOf { it.second }
+        val range = (maxV - minV).let { if (it == 0.0) 1.0 else it }
+        val paddedMin = minV - range * 0.1
+        val paddedMax = maxV + range * 0.1
+        val paddedRange = (paddedMax - paddedMin).let { if (it == 0.0) 1.0 else it }
+        val denom = (visible.size - 1).coerceAtLeast(1)
+
+        fun xFor(i: Int): Float = chartLeft + (chartRight - chartLeft) * (i.toFloat() / denom)
+        fun yFor(v: Double): Float = chartBottom - ((v - paddedMin) / paddedRange * (chartBottom - chartTop)).toFloat()
+
+        val gridPaint = Paint().apply { color = gridColor; strokeWidth = 2f }
+        val textPaint = Paint().apply { color = textColor; textSize = 26f; isAntiAlias = true }
+        for (i in 0..3) {
+            val v = paddedMin + paddedRange * i / 3.0
+            val y = yFor(v)
+            canvas.drawLine(chartLeft, y, chartRight, y, gridPaint)
+            val k = v / 1000.0
+            val label = if (abs(k) >= 1.0) "₱" + String.format(Locale.US, "%.1fk", k) else "₱" + v.toInt()
+            canvas.drawText(label, 4f, y + 8f, textPaint)
+        }
+
+        val linePaint = Paint().apply { color = lineColor; strokeWidth = 6f; isAntiAlias = true; style = Paint.Style.STROKE }
+        val fillPaint = Paint().apply { color = lineColor; alpha = 40; isAntiAlias = true; style = Paint.Style.FILL }
+        val path = Path()
+        val fillPath = Path()
+        visible.forEachIndexed { i, pt ->
+            val x = xFor(i); val y = yFor(pt.second)
+            if (i == 0) { path.moveTo(x, y); fillPath.moveTo(x, chartBottom); fillPath.lineTo(x, y) }
+            else { path.lineTo(x, y); fillPath.lineTo(x, y) }
+        }
+        fillPath.lineTo(xFor(visible.size - 1), chartBottom)
+        fillPath.close()
+        canvas.drawPath(fillPath, fillPaint)
+        canvas.drawPath(path, linePaint)
+
+        val dotPaint = Paint().apply { color = lineColor; isAntiAlias = true }
+        visible.forEachIndexed { i, pt -> canvas.drawCircle(xFor(i), yFor(pt.second), 8f, dotPaint) }
+
+        val labelEvery = if (visible.size > 6) (visible.size / 6).coerceAtLeast(1) else 1
+        visible.forEachIndexed { i, pt ->
+            if (i % labelEvery == 0) {
+                val label = dateFmt.format(Date(pt.first))
+                canvas.drawText(label, (xFor(i) - 30f).coerceAtLeast(0f), height.toFloat() - 20f, textPaint)
+            }
+        }
+
+        selectedIndex?.let { sel ->
+            if (sel in start until end) {
+                val i = sel - start
+                val x = xFor(i); val y = yFor(visible[i].second)
+                val hlPaint = Paint().apply { color = Color.parseColor("#55000000"); strokeWidth = 3f }
+                canvas.drawLine(x, chartTop, x, chartBottom, hlPaint)
+                val bigDot = Paint().apply { color = lineColor; isAntiAlias = true }
+                canvas.drawCircle(x, y, 12f, bigDot)
+
+                val tooltipText = dateFmt.format(Date(visible[i].first)) + "  " + pesoFmt.format(visible[i].second)
+                val tp = Paint().apply { color = Color.WHITE; textSize = 26f; isAntiAlias = true }
+                val bgPaint = Paint().apply { color = Color.parseColor("#212121"); isAntiAlias = true }
+                val textWidth = tp.measureText(tooltipText)
+                val boxLeft = (x - textWidth / 2 - 16f).coerceAtLeast(0f)
+                val boxRight = (boxLeft + textWidth + 32f).coerceAtMost(width.toFloat())
+                val boxTop = (y - 70f).coerceAtLeast(0f)
+                val boxBottom = boxTop + 50f
+                canvas.drawRoundRect(RectF(boxLeft, boxTop, boxRight, boxBottom), 12f, 12f, bgPaint)
+                canvas.drawText(tooltipText, boxLeft + 16f, boxBottom - 16f, tp)
+            }
+        }
+    }
+}
+
+// swipe-between-tabs container. Exempt views (like the category chip scroller) are
+// checked by their actual on-screen position at the moment of touch-down, so a
+// gesture that starts on them is never claimed for tab-switching, regardless of timing.
 class SwipeContainer(context: Context) : FrameLayout(context) {
     var onSwipeLeft: (() -> Unit)? = null
     var onSwipeRight: (() -> Unit)? = null
@@ -1441,13 +1519,26 @@ class SwipeContainer(context: Context) : FrameLayout(context) {
     private var downY = 0f
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var intercepting = false
+    private var touchStartedInExemptZone = false
+    private val exemptViews = mutableListOf<View>()
+    private val rectScratch = Rect()
+
+    fun registerExemptView(v: View) { exemptViews.add(v) }
+    fun clearExemptViews() { exemptViews.clear() }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = ev.x; downY = ev.y; intercepting = false }
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x; downY = ev.y; intercepting = false
+                touchStartedInExemptZone = exemptViews.any { v ->
+                    v.isShown && v.getGlobalVisibleRect(rectScratch) && rectScratch.contains(ev.rawX.toInt(), ev.rawY.toInt())
+                }
+            }
             MotionEvent.ACTION_MOVE -> {
-                val dx = ev.x - downX; val dy = ev.y - downY
-                if (!intercepting && abs(dx) > touchSlop && abs(dx) > abs(dy)) intercepting = true
+                if (!touchStartedInExemptZone && !intercepting) {
+                    val dx = ev.x - downX; val dy = ev.y - downY
+                    if (abs(dx) > touchSlop && abs(dx) > abs(dy)) intercepting = true
+                }
             }
         }
         return intercepting
