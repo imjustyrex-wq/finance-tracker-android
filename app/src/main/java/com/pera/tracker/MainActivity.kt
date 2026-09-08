@@ -52,6 +52,8 @@ class MainActivity : Activity() {
     private val bigFont = Typeface.create("sans-serif", Typeface.BOLD)
     private val bodyFont = Typeface.create("sans-serif", Typeface.NORMAL)
 
+    private val darkThemeIds = setOf("dark", "emerald", "forest", "midnight")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         window.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN)
         super.onCreate(savedInstanceState)
@@ -136,16 +138,20 @@ class MainActivity : Activity() {
     }
 
     private fun palette(): Palette {
-        val isDark = data.settings.theme == "dark" || data.settings.theme == "maya"
+        val isDark = data.settings.theme in darkThemeIds
         val solidText = if (isDark) Color.WHITE else Color.BLACK
         val base = when (data.settings.theme) {
             "dark" -> Palette(Color.parseColor("#0D1B24"), Color.parseColor("#132A38"), solidText, solidText, Color.parseColor("#FFB100"), Color.parseColor("#FFB100"), Color.parseColor("#4ADE80"), Color.parseColor("#FB7185"), Color.parseColor("#233F4F"), Color.parseColor("#0D1B24"))
             "sunset" -> Palette(Color.parseColor("#FFF7ED"), Color.WHITE, solidText, solidText, Color.parseColor("#C2410C"), Color.parseColor("#F59E0B"), Color.parseColor("#16A34A"), Color.parseColor("#DC2626"), Color.parseColor("#FED7AA"), Color.WHITE)
             "ocean" -> Palette(Color.parseColor("#F0F9FF"), Color.WHITE, solidText, solidText, Color.parseColor("#0369A1"), Color.parseColor("#06B6D4"), Color.parseColor("#059669"), Color.parseColor("#DC2626"), Color.parseColor("#BAE6FD"), Color.WHITE)
-            "maya" -> Palette(Color.parseColor("#0B0F0E"), Color.parseColor("#141A18"), solidText, solidText, Color.parseColor("#00D563"), Color.parseColor("#00D563"), Color.parseColor("#00D563"), Color.parseColor("#FF5252"), Color.parseColor("#223028"), Color.BLACK)
-            "gcash" -> Palette(Color.parseColor("#F2F7FF"), Color.WHITE, solidText, solidText, Color.parseColor("#0072CE"), Color.parseColor("#00A3FF"), Color.parseColor("#2E8B57"), Color.parseColor("#E4572E"), Color.parseColor("#D6E4F5"), Color.WHITE)
-            "bpi" -> Palette(Color.parseColor("#FFF5F5"), Color.WHITE, solidText, solidText, Color.parseColor("#C8102E"), Color.parseColor("#F2A900"), Color.parseColor("#2E8B57"), Color.parseColor("#C8102E"), Color.parseColor("#F5D0D0"), Color.WHITE)
-            "bdo" -> Palette(Color.parseColor("#F0F5FF"), Color.WHITE, solidText, solidText, Color.parseColor("#003DA5"), Color.parseColor("#FFC72C"), Color.parseColor("#2E8B57"), Color.parseColor("#E4572E"), Color.parseColor("#D0DDF5"), Color.WHITE)
+            "emerald" -> Palette(Color.parseColor("#0B0F0E"), Color.parseColor("#141A18"), solidText, solidText, Color.parseColor("#00D563"), Color.parseColor("#00D563"), Color.parseColor("#00D563"), Color.parseColor("#FF5252"), Color.parseColor("#223028"), Color.BLACK)
+            "skyline" -> Palette(Color.parseColor("#F2F7FF"), Color.WHITE, solidText, solidText, Color.parseColor("#0072CE"), Color.parseColor("#00A3FF"), Color.parseColor("#2E8B57"), Color.parseColor("#E4572E"), Color.parseColor("#D6E4F5"), Color.WHITE)
+            "ruby" -> Palette(Color.parseColor("#FFF5F5"), Color.WHITE, solidText, solidText, Color.parseColor("#C8102E"), Color.parseColor("#F2A900"), Color.parseColor("#2E8B57"), Color.parseColor("#C8102E"), Color.parseColor("#F5D0D0"), Color.WHITE)
+            "royal" -> Palette(Color.parseColor("#F0F5FF"), Color.WHITE, solidText, solidText, Color.parseColor("#003DA5"), Color.parseColor("#FFC72C"), Color.parseColor("#2E8B57"), Color.parseColor("#E4572E"), Color.parseColor("#D0DDF5"), Color.WHITE)
+            "forest" -> Palette(Color.parseColor("#10201A"), Color.parseColor("#1A2E24"), solidText, solidText, Color.parseColor("#3FA34D"), Color.parseColor("#C9A227"), Color.parseColor("#3FA34D"), Color.parseColor("#E4572E"), Color.parseColor("#24402F"), Color.BLACK)
+            "lavender" -> Palette(Color.parseColor("#F6F1FB"), Color.WHITE, solidText, solidText, Color.parseColor("#7C5CBF"), Color.parseColor("#D68FD6"), Color.parseColor("#2E8B57"), Color.parseColor("#E4572E"), Color.parseColor("#E6DAF5"), Color.WHITE)
+            "coral" -> Palette(Color.parseColor("#FFF4EF"), Color.WHITE, solidText, solidText, Color.parseColor("#FF6F59"), Color.parseColor("#FFB26B"), Color.parseColor("#2E8B57"), Color.parseColor("#D64545"), Color.parseColor("#FFE0D3"), Color.WHITE)
+            "midnight" -> Palette(Color.parseColor("#0A0A16"), Color.parseColor("#15152A"), solidText, solidText, Color.parseColor("#7C6CFF"), Color.parseColor("#7C6CFF"), Color.parseColor("#4ADE80"), Color.parseColor("#FB7185"), Color.parseColor("#26264A"), Color.BLACK)
             else -> Palette(Color.parseColor("#F5F6F4"), Color.WHITE, solidText, solidText, Color.parseColor("#1B3A4B"), Color.parseColor("#FFB100"), Color.parseColor("#2E8B57"), Color.parseColor("#E4572E"), Color.parseColor("#E1E4E0"), Color.WHITE)
         }
         val customHex = data.settings.customAccent
@@ -185,6 +191,46 @@ class MainActivity : Activity() {
         return d
     }
 
+    private fun bannerBg(color: Int): GradientDrawable {
+        val d = GradientDrawable()
+        d.setColor(color)
+        d.cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, 28f, 28f, 28f, 28f)
+        return d
+    }
+
+    // wraps a tab's scrollable content with a solid-color header banner (title + subtitle)
+    private fun pageWithBanner(p: Palette, title: String, subtitle: String, content: View): View {
+        val wrapper = LinearLayout(this)
+        wrapper.orientation = LinearLayout.VERTICAL
+
+        val banner = LinearLayout(this)
+        banner.orientation = LinearLayout.VERTICAL
+        banner.setPadding(40, 60, 40, 32)
+        banner.background = bannerBg(p.primary)
+
+        val titleTv = TextView(this)
+        titleTv.text = title.uppercase(Locale.US)
+        titleTv.typeface = titleFont
+        titleTv.textSize = 21f
+        titleTv.letterSpacing = 0.02f
+        titleTv.setTextColor(p.onPrimary)
+        banner.addView(titleTv)
+
+        val subTv = TextView(this)
+        subTv.text = subtitle
+        subTv.setTextColor(p.onPrimary)
+        subTv.alpha = 0.85f
+        subTv.textSize = 12.5f
+        subTv.typeface = bodyFont
+        subTv.setPadding(0, 6, 0, 0)
+        banner.addView(subTv)
+
+        wrapper.addView(banner)
+        content.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+        wrapper.addView(content)
+        return wrapper
+    }
+
     private fun styledButton(text: String, bgColor: Int, textColor: Int, outline: Boolean = false): Button {
         val b = Button(this)
         b.text = text
@@ -217,18 +263,6 @@ class MainActivity : Activity() {
         return e
     }
 
-    private fun pageTitle(p: Palette, text: String): TextView {
-        val t = TextView(this)
-        t.text = text.uppercase(Locale.US)
-        t.typeface = titleFont
-        t.textSize = 21f
-        t.letterSpacing = 0.02f
-        t.setTextColor(p.text)
-        t.setPadding(0, 0, 0, 16)
-        return t
-    }
-
-    // section header with a small colored accent bar for visual identity
     private fun sectionTitle(p: Palette, text: String, topMargin: Int = 40): LinearLayout {
         val r = row()
         r.gravity = Gravity.CENTER_VERTICAL
@@ -246,7 +280,7 @@ class MainActivity : Activity() {
     private fun card(p: Palette): LinearLayout {
         val c = LinearLayout(this)
         c.orientation = LinearLayout.VERTICAL
-        c.isBaselineAligned = false
+        c.baselineAligned = false
         c.setPadding(28, 28, 28, 28)
         c.background = roundedBg(p.surface, 24f, p.border)
         c.elevation = 5f
@@ -268,7 +302,7 @@ class MainActivity : Activity() {
     private fun row(): LinearLayout {
         val r = LinearLayout(this)
         r.orientation = LinearLayout.HORIZONTAL
-        r.isBaselineAligned = false
+        r.baselineAligned = false
         return r
     }
 
@@ -754,10 +788,8 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this)
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
-        page.setPadding(40, 50, 40, 50)
+        page.setPadding(40, 30, 40, 50)
         scroll.addView(page)
-
-        page.addView(pageTitle(p, "Net worth"))
 
         val nwValue = TextView(this)
         nwValue.text = pesoFormat.format(netWorth())
@@ -816,7 +848,7 @@ class MainActivity : Activity() {
         addBtn.setOnClickListener { showAddExpenseDialog() }
         page.addView(addBtn)
 
-        return scroll
+        return pageWithBanner(p, "Net worth", "Know your pera. Grow your goals.", scroll)
     }
 
     // ---------- CATEGORIES (formerly "Expenses" — adding now happens only from Home) ----------
@@ -825,13 +857,10 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this)
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
-        page.setPadding(40, 50, 40, 50)
+        page.setPadding(40, 30, 40, 50)
         scroll.addView(page)
 
-        page.addView(pageTitle(p, "Categories"))
-        page.addView(bodyText(p, "Manage your spending categories here. Add new expenses from the Home tab.", 13f, muted = true).also { it.setPadding(0, 0, 0, 8) })
-
-        page.addView(sectionTitle(p, "Manage categories"))
+        page.addView(sectionTitle(p, "Manage categories", 0))
         val catCard = card(p)
         for (cat in data.categories) {
             val r = row(); r.gravity = Gravity.CENTER_VERTICAL; r.setPadding(0, 10, 0, 10)
@@ -873,7 +902,7 @@ class MainActivity : Activity() {
             page.addView(r)
         }
 
-        return scroll
+        return pageWithBanner(p, "Categories", "Add new expenses from the Home tab", scroll)
     }
 
     // ---------- STATS ----------
@@ -882,10 +911,8 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this)
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
-        page.setPadding(40, 50, 40, 50)
+        page.setPadding(40, 30, 40, 50)
         scroll.addView(page)
-
-        page.addView(pageTitle(p, "Stats & graphs"))
 
         val monthPrefix = todayString().substring(0, 7)
         val monthExpenses = data.expenses.filter { it.date.length >= 7 && it.date.substring(0, 7) == monthPrefix }
@@ -929,7 +956,7 @@ class MainActivity : Activity() {
         addStatRow(advCard, p, "Current net worth", pesoFormat.format(netWorth()))
         page.addView(advCard)
 
-        return scroll
+        return pageWithBanner(p, "Stats & graphs", "Your money, visualized", scroll)
     }
 
     private fun addStatRow(page: LinearLayout, p: Palette, label: String, value: String) {
@@ -948,12 +975,10 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this)
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
-        page.setPadding(40, 50, 40, 50)
+        page.setPadding(40, 30, 40, 50)
         scroll.addView(page)
 
-        page.addView(pageTitle(p, "Goals"))
         val formCard = card(p)
-
         val labelInput = styledEditText(p, "Goal name (e.g. Emergency fund)")
         formCard.addView(labelInput)
         val targetInput = styledEditText(p, "Target amount")
@@ -1018,7 +1043,7 @@ class MainActivity : Activity() {
             page.addView(gcard)
         }
 
-        return scroll
+        return pageWithBanner(p, "Goals", "Save with purpose", scroll)
     }
 
     // ---------- CREDIT (formerly PayLater) ----------
@@ -1027,12 +1052,10 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this)
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
-        page.setPadding(40, 50, 40, 50)
+        page.setPadding(40, 30, 40, 50)
         scroll.addView(page)
 
-        page.addView(pageTitle(p, "Credit Payment Calendar"))
         val formCard = card(p)
-
         val nameInput = styledEditText(p, "e.g. Shopee PayLater")
         formCard.addView(nameInput)
         val amountInput = styledEditText(p, "Amount")
@@ -1107,7 +1130,7 @@ class MainActivity : Activity() {
             }
         }
 
-        return scroll
+        return pageWithBanner(p, "Credit Payment Calendar", "Never miss a due date", scroll)
     }
 
     // ---------- SETTINGS ----------
@@ -1116,16 +1139,33 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this)
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
-        page.setPadding(40, 50, 40, 50)
+        page.setPadding(40, 30, 40, 50)
         scroll.addView(page)
 
-        page.addView(pageTitle(p, "Settings"))
+        try {
+            val logoIv = ImageView(this)
+            logoIv.setImageResource(R.drawable.ic_launcher)
+            val logoLp = LinearLayout.LayoutParams(140, 140)
+            logoLp.gravity = Gravity.CENTER_HORIZONTAL
+            logoLp.bottomMargin = 6
+            logoIv.layoutParams = logoLp
+            page.addView(logoIv)
+            val wordmark = TextView(this)
+            wordmark.text = "SinTrack"
+            wordmark.typeface = titleFont
+            wordmark.textSize = 16f
+            wordmark.gravity = Gravity.CENTER_HORIZONTAL
+            wordmark.setTextColor(p.text)
+            wordmark.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.bottomMargin = 20 }
+            page.addView(wordmark)
+        } catch (e: Exception) { }
 
         val themeCard = card(p)
         themeCard.addView(sectionTitle(p, "Theme", 0))
         val themes = listOf(
             "light" to "Light", "dark" to "Dark", "sunset" to "Sunset", "ocean" to "Ocean",
-            "maya" to "Maya", "gcash" to "GCash", "bpi" to "BPI", "bdo" to "BDO"
+            "emerald" to "Emerald", "skyline" to "Skyline", "ruby" to "Ruby", "royal" to "Royal",
+            "forest" to "Forest", "lavender" to "Lavender", "coral" to "Coral", "midnight" to "Midnight"
         )
         for (chunk in themes.chunked(4)) {
             val themeRow = row()
@@ -1134,7 +1174,7 @@ class MainActivity : Activity() {
                 val active = data.settings.theme == id
                 val btn = styledButton(label, if (active) p.primary else p.text, if (active) p.onPrimary else p.text, outline = !active)
                 val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f); lp.marginEnd = 8
-                btn.layoutParams = lp; btn.textSize = 12f; btn.setPadding(6, 20, 6, 20)
+                btn.layoutParams = lp; btn.textSize = 11.5f; btn.setPadding(4, 20, 4, 20)
                 btn.setOnClickListener { data.settings.theme = id; persist(); showTab("settings", 0) }
                 themeRow.addView(btn)
             }
@@ -1298,7 +1338,7 @@ class MainActivity : Activity() {
         dataCard.addView(resetBtn)
         page.addView(dataCard)
 
-        return scroll
+        return pageWithBanner(p, "Settings", "Make it yours", scroll)
     }
 
     private fun showEditAccountDialog(account: Account) {
@@ -1362,12 +1402,12 @@ class MainActivity : Activity() {
     private fun showTestNotification() {
         val channelId = "pera_tracker_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Pera Tracker", NotificationManager.IMPORTANCE_DEFAULT)
+            val channel = NotificationChannel(channelId, "SinTrack", NotificationManager.IMPORTANCE_DEFAULT)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
         val builder = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("Pera Tracker")
+            .setContentTitle("SinTrack")
             .setContentText("You'll see reminders here for upcoming credit dues.")
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
         NotificationManagerCompat.from(this).notify(1, builder.build())
