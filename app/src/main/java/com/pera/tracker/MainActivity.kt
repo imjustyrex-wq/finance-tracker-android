@@ -43,6 +43,7 @@ class MainActivity : Activity() {
     private lateinit var data: AppData
     private lateinit var contentContainer: SwipeContainer
     private lateinit var navBar: LinearLayout
+    private lateinit var footer: TextView
     private var currentTab: String = "home"
     private val pesoFormat: NumberFormat = NumberFormat.getCurrencyInstance(Locale("en", "PH"))
     private val navButtons = mutableMapOf<String, TextView>()
@@ -69,6 +70,15 @@ class MainActivity : Activity() {
         contentContainer.onSwipeLeft = { navigateRelative(1) }
         contentContainer.onSwipeRight = { navigateRelative(-1) }
         root.addView(contentContainer)
+
+        footer = TextView(this)
+        footer.text = "SinTrack · Owned by SinCorp"
+        footer.textSize = 10.5f
+        footer.typeface = bodyFont
+        footer.gravity = Gravity.CENTER
+        footer.setPadding(0, 14, 0, 14)
+        footer.alpha = 0.55f
+        root.addView(footer)
 
         navBar = LinearLayout(this)
         navBar.orientation = LinearLayout.HORIZONTAL
@@ -191,41 +201,73 @@ class MainActivity : Activity() {
         return d
     }
 
-    private fun bannerBg(color: Int): GradientDrawable {
-        val d = GradientDrawable()
-        d.setColor(color)
-        d.cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, 28f, 28f, 28f, 28f)
-        return d
+    // slim, fully-rounded floating banner — a "pill," not a tall edge-to-edge block
+    private fun simpleBannerContent(p: Palette, title: String, subtitle: String): LinearLayout {
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        val t = TextView(this)
+        t.text = title.uppercase(Locale.US)
+        t.typeface = titleFont
+        t.textSize = 17f
+        t.letterSpacing = 0.02f
+        t.setTextColor(p.onPrimary)
+        col.addView(t)
+        val s = TextView(this)
+        s.text = subtitle
+        s.setTextColor(p.onPrimary)
+        s.alpha = 0.85f
+        s.textSize = 12f
+        s.typeface = bodyFont
+        s.setPadding(0, 4, 0, 0)
+        col.addView(s)
+        return col
     }
 
-    // wraps a tab's scrollable content with a solid-color header banner (title + subtitle)
-    private fun pageWithBanner(p: Palette, title: String, subtitle: String, content: View): View {
+    // app name + icon inline, used only for the Settings banner
+    private fun brandBannerContent(p: Palette, subtitle: String): LinearLayout {
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        val row = row()
+        row.gravity = Gravity.CENTER_VERTICAL
+        val name = TextView(this)
+        name.text = "SinTrack"
+        name.typeface = titleFont
+        name.textSize = 18f
+        name.setTextColor(p.onPrimary)
+        row.addView(name)
+        try {
+            val icon = ImageView(this)
+            icon.setImageResource(R.drawable.ic_launcher)
+            icon.layoutParams = LinearLayout.LayoutParams(46, 46).also { it.marginStart = 10 }
+            row.addView(icon)
+        } catch (e: Exception) { }
+        col.addView(row)
+        val s = TextView(this)
+        s.text = subtitle
+        s.setTextColor(p.onPrimary)
+        s.alpha = 0.85f
+        s.textSize = 12f
+        s.typeface = bodyFont
+        s.setPadding(0, 4, 0, 0)
+        col.addView(s)
+        return col
+    }
+
+    private fun pageWithBanner(p: Palette, bannerContent: View, content: View): View {
         val wrapper = LinearLayout(this)
         wrapper.orientation = LinearLayout.VERTICAL
 
-        val banner = LinearLayout(this)
-        banner.orientation = LinearLayout.VERTICAL
-        banner.setPadding(40, 60, 40, 32)
-        banner.background = bannerBg(p.primary)
+        val pill = LinearLayout(this)
+        pill.orientation = LinearLayout.VERTICAL
+        pill.setPadding(32, 24, 32, 22)
+        pill.background = roundedBg(p.primary, 26f)
+        pill.elevation = 4f
+        val pillLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        pillLp.setMargins(24, 46, 24, 6)
+        pill.layoutParams = pillLp
+        pill.addView(bannerContent)
+        wrapper.addView(pill)
 
-        val titleTv = TextView(this)
-        titleTv.text = title.uppercase(Locale.US)
-        titleTv.typeface = titleFont
-        titleTv.textSize = 21f
-        titleTv.letterSpacing = 0.02f
-        titleTv.setTextColor(p.onPrimary)
-        banner.addView(titleTv)
-
-        val subTv = TextView(this)
-        subTv.text = subtitle
-        subTv.setTextColor(p.onPrimary)
-        subTv.alpha = 0.85f
-        subTv.textSize = 12.5f
-        subTv.typeface = bodyFont
-        subTv.setPadding(0, 6, 0, 0)
-        banner.addView(subTv)
-
-        wrapper.addView(banner)
         content.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
         wrapper.addView(content)
         return wrapper
@@ -486,6 +528,7 @@ class MainActivity : Activity() {
     }
 
     private fun showTab(tab: String, direction: Int) {
+        accrueSavingsInterest()
         checkGoalCompletions()
         currentTab = tab
         contentContainer.removeAllViews()
@@ -502,6 +545,8 @@ class MainActivity : Activity() {
         contentContainer.setBackgroundColor(p.bg)
         contentContainer.addView(view)
         navBar.setBackgroundColor(p.surface)
+        footer.setBackgroundColor(p.surface)
+        footer.setTextColor(p.text)
         highlightNav()
 
         val screenWidth = resources.displayMetrics.widthPixels.toFloat()
@@ -738,6 +783,50 @@ class MainActivity : Activity() {
         showAnimatedDialog(builder)
     }
 
+    // ---------- CANCEL GOAL (returns saved money to an account of your choice) ----------
+    private fun showCancelGoalDialog(goal: Goal) {
+        if (goal.savedAmount <= 0.0) {
+            AlertDialog.Builder(this)
+                .setTitle("Delete this goal?")
+                .setMessage("Nothing has been saved toward it yet.")
+                .setPositiveButton("Delete") { _, _ -> data.goals.removeAll { it.id == goal.id }; persist(); showTab("goals", 0) }
+                .setNegativeButton("Keep goal", null)
+                .let { showAnimatedDialog(it) }
+            return
+        }
+        if (data.accounts.isEmpty()) {
+            Toast.makeText(this, "Add an account first so the saved money has somewhere to go", Toast.LENGTH_LONG).show()
+            return
+        }
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(40, 30, 40, 10)
+        val label = TextView(this)
+        label.text = "\"${goal.label}\" has " + pesoFormat.format(goal.savedAmount) + " saved.\nMove it to:"
+        layout.addView(label)
+        val accSpinner = Spinner(this)
+        accSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, data.accounts.map { it.name })
+        val spinnerLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT); spinnerLp.topMargin = 16
+        accSpinner.layoutParams = spinnerLp
+        layout.addView(accSpinner)
+
+        val builder = AlertDialog.Builder(this)
+            .setTitle("Cancel goal")
+            .setView(layout)
+            .setPositiveButton("Move & Cancel") { _, _ ->
+                val accIndex = accSpinner.selectedItemPosition.coerceIn(0, data.accounts.size - 1)
+                val account = data.accounts[accIndex]
+                account.balance += goal.savedAmount
+                logChange("Cancelled goal: ${goal.label} — " + pesoFormat.format(goal.savedAmount) + " moved to ${account.name}")
+                data.goals.removeAll { it.id == goal.id }
+                persist()
+                Toast.makeText(this, "Moved to ${account.name}", Toast.LENGTH_SHORT).show()
+                showTab("goals", 0)
+            }
+            .setNegativeButton("Keep goal", null)
+        showAnimatedDialog(builder)
+    }
+
     private fun showGoalProgressDialog(goal: Goal) {
         showEnlargeDialog(goal.label) { container ->
             val p = palette()
@@ -848,7 +937,7 @@ class MainActivity : Activity() {
         addBtn.setOnClickListener { showAddExpenseDialog() }
         page.addView(addBtn)
 
-        return pageWithBanner(p, "Net worth", "Know your pera. Grow your goals.", scroll)
+        return pageWithBanner(p, simpleBannerContent(p, "Net worth", "Know your pera. Grow your goals."), scroll)
     }
 
     // ---------- CATEGORIES (formerly "Expenses" — adding now happens only from Home) ----------
@@ -902,7 +991,7 @@ class MainActivity : Activity() {
             page.addView(r)
         }
 
-        return pageWithBanner(p, "Categories", "Add new expenses from the Home tab", scroll)
+        return pageWithBanner(p, simpleBannerContent(p, "Categories", "Add new expenses from the Home tab"), scroll)
     }
 
     // ---------- STATS ----------
@@ -956,7 +1045,7 @@ class MainActivity : Activity() {
         addStatRow(advCard, p, "Current net worth", pesoFormat.format(netWorth()))
         page.addView(advCard)
 
-        return pageWithBanner(p, "Stats & graphs", "Your money, visualized", scroll)
+        return pageWithBanner(p, simpleBannerContent(p, "Stats & graphs", "Your money, visualized"), scroll)
     }
 
     private fun addStatRow(page: LinearLayout, p: Palette, label: String, value: String) {
@@ -1019,8 +1108,8 @@ class MainActivity : Activity() {
             nameText.setTextColor(p.text); nameText.typeface = headFont; nameText.textSize = 15f
             nameText.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             nameRow.addView(nameText)
-            val delBtn = styledButton("Delete", p.bad, p.bad, outline = true)
-            delBtn.setOnClickListener { data.goals.removeAll { g -> g.id == goal.id }; persist(); showTab("goals", 0) }
+            val delBtn = styledButton("Cancel", p.bad, p.bad, outline = true)
+            delBtn.setOnClickListener { showCancelGoalDialog(goal) }
             nameRow.addView(delBtn)
             gcard.addView(nameRow)
 
@@ -1043,7 +1132,7 @@ class MainActivity : Activity() {
             page.addView(gcard)
         }
 
-        return pageWithBanner(p, "Goals", "Save with purpose", scroll)
+        return pageWithBanner(p, simpleBannerContent(p, "Goals", "Save with purpose"), scroll)
     }
 
     // ---------- CREDIT (formerly PayLater) ----------
@@ -1130,7 +1219,7 @@ class MainActivity : Activity() {
             }
         }
 
-        return pageWithBanner(p, "Credit Payment Calendar", "Never miss a due date", scroll)
+        return pageWithBanner(p, simpleBannerContent(p, "Credit Payment Calendar", "Never miss a due date"), scroll)
     }
 
     // ---------- SETTINGS ----------
@@ -1141,24 +1230,6 @@ class MainActivity : Activity() {
         page.orientation = LinearLayout.VERTICAL
         page.setPadding(40, 30, 40, 50)
         scroll.addView(page)
-
-        try {
-            val logoIv = ImageView(this)
-            logoIv.setImageResource(R.drawable.ic_launcher)
-            val logoLp = LinearLayout.LayoutParams(140, 140)
-            logoLp.gravity = Gravity.CENTER_HORIZONTAL
-            logoLp.bottomMargin = 6
-            logoIv.layoutParams = logoLp
-            page.addView(logoIv)
-            val wordmark = TextView(this)
-            wordmark.text = "SinTrack"
-            wordmark.typeface = titleFont
-            wordmark.textSize = 16f
-            wordmark.gravity = Gravity.CENTER_HORIZONTAL
-            wordmark.setTextColor(p.text)
-            wordmark.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.bottomMargin = 20 }
-            page.addView(wordmark)
-        } catch (e: Exception) { }
 
         val themeCard = card(p)
         themeCard.addView(sectionTitle(p, "Theme", 0))
@@ -1338,7 +1409,7 @@ class MainActivity : Activity() {
         dataCard.addView(resetBtn)
         page.addView(dataCard)
 
-        return pageWithBanner(p, "Settings", "Make it yours", scroll)
+        return pageWithBanner(p, brandBannerContent(p, "Settings — make it yours"), scroll)
     }
 
     private fun showEditAccountDialog(account: Account) {
